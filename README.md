@@ -36,7 +36,7 @@ El primer arranque ofrece un tutorial de nueve pasos. Avanza al realizar las acc
 - **VS Code:** Monaco con resaltado, minimapa, autocompletado HTML/CSS, búsqueda, deshacer/rehacer, explorador y terminal integrado. Archivo, Editar, Ver y Terminal tienen acciones funcionales. Ctrl/⌘+S guarda el archivo.
 - **Chrome:** pestañas, nueva pestaña, cierre, barra de direcciones, atrás/adelante, recarga y DevTools del caso. La documentación se abre en otra pestaña. Cambiar de pestaña conserva el formulario del proyecto.
 - **Archivos:** documentos compartidos con VS Code, selección, vista previa y creación de archivos HTML/CSS/Markdown/texto.
-- **Equipo:** encargo de Marta, mensajes de texto con respuestas escritas para el caso, pistas y entrega.
+- **Equipo:** interfaz inspirada en Slack, canales con conversaciones separadas, mensajes directos a Marta, búsqueda en la conversación, mensajes con respuestas escritas para el caso, pistas y entrega.
 - **Tickets:** criterios de aceptación y seguimiento de las comprobaciones.
 
 Para jugar sin tutorial: en VS Code ejecuta `npm run dev` en el terminal **del juego**, abre Chrome y prueba un registro con una contraseña corta. Inspecciona el correo en DevTools. En `index.html`, añade `<label for="email">Correo electrónico</label>` antes del campo, guarda, ejecuta `npm test` dentro del juego y prueba el registro con 8 caracteres o más. Entrega en Equipo.

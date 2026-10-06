@@ -7,6 +7,11 @@ import {
   Check,
   CheckCircle2,
   ChevronRight,
+  ChevronDown,
+  Hash,
+  Users,
+  Bell,
+  Plus,
   Code2,
   Folder,
   FileCode,
@@ -135,7 +140,11 @@ function App() {
     [devtools, setDevtools] = useState(false),
     [url, setUrl] = useState("http://localhost:3000"),
     [revision, setRevision] = useState(0),
-    [messages, setMessages] = useState<string[]>([]),
+    [chatChannel, setChatChannel] = useState("bienvenida"),
+    [channelMessages, setChannelMessages] = useState<Record<string, string[]>>(
+      {},
+    ),
+    [chatSearch, setChatSearch] = useState(""),
     [chatInput, setChatInput] = useState(""),
     [editorMenu, setEditorMenu] = useState<string | null>(null),
     [showExplorer, setShowExplorer] = useState(true),
@@ -145,6 +154,11 @@ function App() {
     [finish, setFinish] = useState(false),
     [saved, setSaved] = useState(true),
     [help, setHelp] = useState(false);
+  const chatLog = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const log = chatLog.current;
+    if (log) log.scrollTop = log.scrollHeight;
+  }, [chatChannel, channelMessages]);
   const codeEditor = useRef<
     import("monaco-editor").editor.IStandaloneCodeEditor | null
   >(null);
@@ -417,115 +431,264 @@ function App() {
     openApp(target);
     if (tutorial === 6) chooseFile("index.html");
   }
+  const messages = channelMessages[chatChannel] ?? [];
+  function setMessages(update: (previous: string[]) => string[]) {
+    setChannelMessages((previous) => ({
+      ...previous,
+      [chatChannel]: update(previous[chatChannel] ?? []),
+    }));
+  }
+  const visibleChat = (text: string) =>
+    !chatSearch.trim() ||
+    text.toLowerCase().includes(chatSearch.trim().toLowerCase());
   function renderApplication(windowId: AppName) {
     return (
       <>
         {" "}
         {windowId === "chat" && (
-          <div className="chat-layout">
+          <div className="chat-layout slack-layout">
+            <div className="slack-topbar">
+              <MessageSquare size={19} />
+              <label className="slack-search">
+                <Search size={16} />
+                <input
+                  aria-label="Buscar en la conversación"
+                  placeholder="Buscar en Forma"
+                  value={chatSearch}
+                  onChange={(e) => setChatSearch(e.target.value)}
+                />
+              </label>
+              <button
+                aria-label="Ayuda de Equipo"
+                onClick={() =>
+                  notify(
+                    "Selecciona un canal o a Marta. Puedes enviar mensajes, pedir pistas y entregar tu cambio.",
+                  )
+                }
+              >
+                <HelpCircle size={19} />
+              </button>
+            </div>
+            <nav className="slack-rail" aria-label="Espacios de trabajo">
+              <span className="slack-workspace-icon">f</span>
+              <button
+                className="selected"
+                onClick={() => setChatChannel("bienvenida")}
+              >
+                <MessageSquare size={21} />
+                <span>Inicio</span>
+              </button>
+              <button onClick={() => setChatChannel("Marta")}>
+                <Users size={21} />
+                <span>Mensajes</span>
+              </button>
+              <button onClick={() => openApp("tickets")}>
+                <Bell size={21} />
+                <span>Actividad</span>
+              </button>
+              <span className="slack-self-avatar">
+                J<i />
+              </span>
+            </nav>
             <aside className="chat-sidebar">
               <h2>
-                forma<span>workspace</span>
+                Forma <ChevronDown size={16} />
               </h2>
-              <div className="team-badge">
-                <span className="green-dot" /> 4 EN LÍNEA
+              <div className="slack-workspace-caption">
+                Tu equipo de producto
               </div>
-              <span className="sidebar-heading">CANALES</span>
-              <button className="channel active"># bienvenida</button>
+              <span className="sidebar-heading">
+                <ChevronDown size={13} /> Canales
+              </span>
+              {["bienvenida", "frontend", "random"].map((channel) => (
+                <button
+                  key={channel}
+                  aria-label={channel}
+                  aria-pressed={chatChannel === channel}
+                  className={`channel ${chatChannel === channel ? "active" : ""}`}
+                  onClick={() => {
+                    setChatChannel(channel);
+                    setChatSearch("");
+                  }}
+                >
+                  <Hash size={16} />
+                  {channel}
+                  {channel === "bienvenida" && (
+                    <span className="slack-channel-count">2</span>
+                  )}
+                </button>
+              ))}
+              <span className="sidebar-heading">
+                <ChevronDown size={13} /> Mensajes directos
+              </span>
               <button
-                className="channel"
-                onClick={() =>
-                  notify(
-                    "El resto del equipo está en una reunión. Marta es tu contacto hoy.",
-                  )
-                }
+                aria-label="Marta"
+                aria-pressed={chatChannel === "Marta"}
+                className={`channel ${chatChannel === "Marta" ? "active" : ""}`}
+                onClick={() => {
+                  setChatChannel("Marta");
+                  setChatSearch("");
+                }}
               >
-                # frontend
-              </button>
-              <button
-                className="channel"
-                onClick={() =>
-                  notify(
-                    "Mensaje fijado: el café es gratis. La paciencia también.",
-                  )
-                }
-              >
-                # random
-              </button>
-              <span className="sidebar-heading">MENSAJES DIRECTOS</span>
-              <button
-                className="channel"
-                onClick={() =>
-                  notify("Estás hablando con Marta en bienvenida.")
-                }
-              >
-                <span className="green-dot" /> Marta
+                <span className="slack-dm-avatar">
+                  M<i />
+                </span>
+                Marta
               </button>
               <div className="chat-profile">
                 <span className="junior-avatar">J</span>
                 <div>
-                  Tu nombre aquí<small>Junior · aprendiendo</small>
+                  Junior
+                  <small>
+                    <span className="green-dot" /> Disponible
+                  </small>
                 </div>
               </div>
             </aside>
             <section className="chat-main">
               <div className="chat-heading">
-                <b># bienvenida</b>
-                <span>Tu primer día. Estamos contigo.</span>
+                <div>
+                  <b>
+                    {chatChannel === "Marta" ? (
+                      <span className="green-dot" />
+                    ) : (
+                      <Hash size={20} />
+                    )}{" "}
+                    {chatChannel}
+                  </b>
+                  <span>
+                    {chatChannel === "bienvenida"
+                      ? "Tu primer día. Estamos contigo."
+                      : chatChannel === "frontend"
+                        ? "Código, preguntas y pequeñas victorias."
+                        : chatChannel === "random"
+                          ? "La pausa del café también cuenta."
+                          : "Product lead · En línea"}
+                  </span>
+                </div>
+                <span className="slack-members">
+                  <Users size={16} /> {chatChannel === "Marta" ? 2 : 4}
+                </span>
               </div>
-              <div className="chat-messages">
-                <div className="date-rule">LUNES · TU PRIMER DÍA</div>
-                <div className="message">
-                  <span className="marta-avatar">M</span>
-                  <div>
-                    <b>
-                      Marta <small>09:05</small>
-                      <span>PRODUCT LEAD</span>
-                    </b>
-                    <p>
-                      ¡Bienvenido a Forma! 🎉 Ya tienes tu ordenador preparado.
-                    </p>
-                    <p>
-                      Para empezar te dejamos algo sencillito: hay gente que no
-                      termina el registro. El campo de correo es un poco…
-                      misterioso.
-                    </p>
-                    <p>
-                      ¿Puedes reproducirlo, revisar qué pasa y dejarlo mejor?
-                      Sin prisa. Bueno, tenemos daily después 🙂
-                    </p>
-                    <button
-                      className="ticket-attachment"
-                      onClick={() => openApp("tickets")}
-                    >
-                      <ClipboardList size={19} />
+              <div className="chat-messages" ref={chatLog} aria-live="polite">
+                <div className="date-rule">
+                  <span>Lunes · Tu primer día</span>
+                </div>
+                {(chatChannel === "bienvenida" || chatChannel === "Marta") &&
+                  visibleChat(
+                    "Marta Bienvenido Forma registro correo UX-001",
+                  ) && (
+                    <div className="message">
+                      <span className="marta-avatar">M</span>
                       <div>
-                        <b>UX-001 · El misterio del registro</b>
-                        <span>Ver encargo y criterios de aceptación</span>
+                        <b>
+                          Marta <small>09:05</small>
+                          <span>PRODUCT LEAD</span>
+                        </b>
+                        <p>
+                          ¡Bienvenido a Forma! 🎉 Ya tienes tu ordenador
+                          preparado.
+                        </p>
+                        <p>
+                          Para empezar te dejamos algo sencillito: hay gente que
+                          no termina el registro. El campo de correo es un poco…
+                          misterioso.
+                        </p>
+                        <p>
+                          ¿Puedes reproducirlo, revisar qué pasa y dejarlo
+                          mejor? Sin prisa. Bueno, tenemos daily después 🙂
+                        </p>
+                        <button
+                          className="ticket-attachment"
+                          onClick={() => openApp("tickets")}
+                        >
+                          <ClipboardList size={19} />
+                          <div>
+                            <b>UX-001 · El misterio del registro</b>
+                            <span>Ver encargo y criterios de aceptación</span>
+                          </div>
+                          <ArrowUpRight size={15} />
+                        </button>
                       </div>
-                      <ArrowUpRight size={15} />
-                    </button>
-                  </div>
-                </div>
-                <div className="message">
-                  <span className="colleague-avatar">N</span>
-                  <div>
-                    <b>
-                      Nico <small>09:07</small>
-                      <span>FRONTEND</span>
-                    </b>
-                    <p>
-                      El proyecto está en Code. Terminal →{" "}
-                      <code>npm run dev</code>. Después lo ves en Chrome. Si te
-                      pierdes, el README tiene un mapa.
-                    </p>
-                  </div>
-                </div>
-                {messages.map((m, i) => (
+                    </div>
+                  )}
+                {chatChannel === "bienvenida" &&
+                  visibleChat(
+                    "Nico proyecto Code terminal npm run dev Chrome README",
+                  ) && (
+                    <div className="message">
+                      <span className="colleague-avatar">N</span>
+                      <div>
+                        <b>
+                          Nico <small>09:07</small>
+                          <span>FRONTEND</span>
+                        </b>
+                        <p>
+                          El proyecto está en Code. Terminal →{" "}
+                          <code>npm run dev</code>. Después lo ves en Chrome. Si
+                          te pierdes, el README tiene un mapa.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                {chatChannel === "frontend" &&
+                  visibleChat("Nico frontend terminal npm run dev") && (
+                    <div className="message">
+                      <span className="colleague-avatar">N</span>
+                      <div>
+                        <b>
+                          Nico <small>09:07</small>
+                        </b>
+                        <p>
+                          ¡Bienvenido al canal de frontend! Arranca el proyecto
+                          con <code>npm run dev</code> en VS Code. Aquí puedes
+                          preguntar por el terminal o por las etiquetas HTML.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                {chatChannel === "random" &&
+                  visibleChat("Marta café pausa") && (
+                    <div className="message">
+                      <span className="marta-avatar">M</span>
+                      <div>
+                        <b>
+                          Marta <small>09:10</small>
+                        </b>
+                        <p>
+                          El café es gratis ☕. La paciencia también. Acuérdate
+                          de hacer una pausa entre bugs.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                {messages.filter(visibleChat).map((m, i) => (
                   <div className="message reply" key={i}>
-                    <span className="marta-avatar">M</span>
+                    <span
+                      className={
+                        m.startsWith("TÚ")
+                          ? "junior-avatar"
+                          : m.startsWith("NICO")
+                            ? "colleague-avatar"
+                            : "marta-avatar"
+                      }
+                    >
+                      {m.startsWith("TÚ")
+                        ? "J"
+                        : m.startsWith("NICO")
+                          ? "N"
+                          : "M"}
+                    </span>
                     <div>
-                      <p>{m}</p>
+                      <b>
+                        {m.startsWith("TÚ")
+                          ? "Tú"
+                          : m.startsWith("NICO")
+                            ? "Nico"
+                            : "Marta"}
+                        <small>09:12</small>
+                      </b>
+                      <p>{m.slice(m.indexOf(" · ") + 3)}</p>
                     </div>
                   </div>
                 ))}
@@ -550,17 +713,30 @@ function App() {
                     setChatInput("");
                   }}
                 >
+                  <div className="slack-compose-label">
+                    Mensaje a{" "}
+                    {chatChannel === "Marta" ? "Marta" : "#" + chatChannel}
+                  </div>
                   <input
                     aria-label="Mensaje al equipo"
-                    placeholder="Escribe un mensaje al equipo…"
+                    placeholder={`Escribe a ${chatChannel === "Marta" ? "Marta" : "#" + chatChannel}…`}
                     value={chatInput}
                     onChange={(e) => setChatInput(e.target.value)}
                   />
-                  <button aria-label="Enviar mensaje" type="submit">
-                    <Send size={16} />
-                  </button>
+                  <div className="slack-compose-bottom">
+                    <span>
+                      <Plus size={15} /> Enter para enviar
+                    </span>
+                    <button
+                      aria-label="Enviar mensaje"
+                      type="submit"
+                      disabled={!chatInput.trim()}
+                    >
+                      <Send size={16} />
+                    </button>
+                  </div>
                 </form>
-                <span>¿Qué necesitas decir?</span>
+                <span>Acciones del primer día</span>
                 <div>
                   <button
                     onClick={() =>
