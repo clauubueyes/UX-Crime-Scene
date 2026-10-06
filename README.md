@@ -1,13 +1,13 @@
-# UX Crime Scene
+# UX Crime Scene — The Junior Files
 
-Juego de investigación UX en navegador. MVP con tres niveles progresivos: registro, envío y checkout. React + TypeScript + Vite; sin backend, servicios de IA ni base de datos. El progreso de casos completados se guarda localmente; la investigación en curso se reinicia al recargar.
+Simulador del primer trabajo de un junior. Oficina 2D explorable y ordenador con escritorio, chat del equipo, navegador inspirado en Chrome, editor inspirado en VS Code y terminal simulado. Primera jornada completa: reproducir un problema de registro, investigar el campo de correo, editar HTML, comprobar el cambio y entregarlo.
 
-## Desarrollo
+## Ejecutar
 
-Node.js 22.12+ (comprobado con Node 24).
+Node.js 22.12+ (validado con 24.19).
 
 ```sh
-npm ci
+npm ci --cache /tmp/ux-crime-npm --no-audit --no-fund
 npm run dev
 ```
 
@@ -17,25 +17,28 @@ npm run build
 npm run preview
 ```
 
-## Cómo jugar
+Vercel: preset Vite, build `npm run build`, salida `dist`. Sin backend, claves ni base de datos. Google Fonts es opcional; hay fuentes locales de respaldo.
 
-Completa la tarea en **Usar interfaz**. Cambia a **Investigar**, selecciona un sospechoso, aplica una herramienta y captura la observación. Selecciona una prueba en la bandeja y presenta una acusación. Para cerrar el caso hay que completar la tarea y demostrar ambos problemas. Una acusación incorrecta resta 75 XP; explorar no penaliza. Los niveles siguientes se desbloquean al cerrar el anterior.
+## Jugar
 
-- Q: selector de herramientas. 1–3: herramienta en investigación.
-- E: capturar prueba del elemento seleccionado.
-- Espacio: visión forense en investigación.
-- WASD/flechas: desplazar la escena en investigación.
-- Tab: navegación nativa. Esc: expediente/cerrar panel.
-- Los atajos se suspenden al escribir. Todos los controles tienen alternativas con botones.
+- WASD/flechas: moverse por el pasillo de la oficina. E: interactuar con el objeto cercano. Clic en objetos: interacción directa, también en móvil.
+- Ordenador: chat, editor, navegador y tickets desde el dock.
+- En Code, ejecuta `npm run dev` en el terminal del juego. Abre Chrome y prueba un registro con una contraseña corta.
+- Abre DevTools e inspecciona el correo. La documentación y el chat ofrecen pistas.
+- Edita `index.html`: añade una etiqueta con texto y `for="email"`, conservando el campo. Guarda con el botón o Ctrl/⌘+S.
+- Ejecuta `npm test` dentro del juego y comprueba un registro válido en Chrome con la versión guardada.
+- Entrega desde el chat o ticket. La entrega requiere reproducción, inspección, corrección, comprobación y registro exitoso.
+- Esc vuelve a la oficina o cierra diálogos.
 
-El caso 2 tiene un recorrido deliberadamente incorrecto: enfoca Dirección y pulsa Tab dos veces (Ciudad → Código postal). El caso 3 simula un pago de 6,5 segundos: captura con Interaction probe después de 2,1 segundos. Todos los pagos y datos son ficticios.
+El juego guarda archivos y progreso en `localStorage` (`ux-junior:v1`). Los procesos simulados se reinician al recargar: vuelve a ejecutar `npm run dev` dentro del juego. No se guardan los datos introducidos en el formulario. No uses datos personales. El prototipo contiene una jornada; el día 2 todavía no está implementado.
 
-## Arquitectura
+## Simulación y arquitectura
 
-`src/engine.ts`: casos, herramientas, observaciones y evaluación pura. `src/main.tsx`: escenas React, interacciones y shell del juego. `src/style.css`: presentación responsive y movimiento reducido. `src/engine.test.ts`: reglas de evidencia y acusación.
+`src/workday.ts`: archivos iniciales, reglas del ticket y terminal de comandos permitidos.
+`src/main.tsx`: oficina, aplicaciones, guardado, edición, iframe y estados de la jornada.
+`src/style.css`: oficina y componentes adaptables.
+`src/engine.test.ts`: validación de correcciones, entrega y comandos.
 
-Para añadir un caso, define sus sospechosos y reglas en el motor y crea su escena con eventos instrumentados. El MVP no es un detector universal de UX. Forensic Vision muestra elementos investigables, no respuestas. Focus Tracker registra una secuencia simulada y no realiza una auditoría general de accesibilidad.
+El editor modifica HTML/CSS reales almacenados localmente; al guardar se reconstruye la página. El iframe se aísla con sandbox y CSP: se eliminan scripts, atributos de eventos y recursos externos del HTML editado. El registro usa un controlador predefinido, y se aceptan mensajes solo del iframe activo. No se ejecutan comandos de sistema ni JavaScript escrito por el jugador. El terminal y DevTools son simulaciones del primer ticket, no herramientas generales ni navegadores completos.
 
-## Despliegue
-
-Vercel: preset Vite, comando `npm run build`, salida `dist`. No requiere variables de entorno. Las fuentes de Google son opcionales y tienen fallback local. Sin sincronización entre dispositivos ni cuentas. Borrar los datos del navegador elimina el progreso.
+La validación del ticket comprueba la asociación de etiqueta y campo; no es una auditoría de accesibilidad universal. El movimiento está limitado al pasillo libre de la oficina; no hay física ni navegación 3D.

@@ -1,21 +1,66 @@
-import {test} from 'node:test';
-import assert from 'node:assert/strict';
-import {cases,observe,evaluate,type Evidence} from './engine.ts';
-test('hidden errors require the interaction that reveals them',()=>{
- assert.equal(observe(cases[0],'password','inspect',[]).crimeId,null);
- assert.equal(observe(cases[0],'password','inspect',['register-error']).crimeId,'requirements');
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import {
+  starterFiles,
+  checkTicket,
+  canDeliver,
+  emptyProgress,
+  terminalCommand,
+} from "./workday.ts";
+const fixed = starterFiles["index.html"].replace(
+  '<input id="email"',
+  '<label for="email">Correo electrónico</label>\n    <input id="email"',
+);
+test("starter reproduces the ticket; a bound visible label fixes it", () => {
+  assert.equal(checkTicket(starterFiles["index.html"]).ok, false);
+  assert.equal(checkTicket(fixed).ok, true);
 });
-test('tool and suspect must match; red herrings cannot prove a crime',()=>{
- assert.equal(observe(cases[2],'pay','inspect',['payment-pending']).crimeId,null);
- assert.equal(observe(cases[2],'pay','probe',['payment-pending']).crimeId,'feedback');
- assert.equal(observe(cases[0],'badge','inspect',[]).crimeId,null);
+test("unbound or empty labels and removing the email field cannot pass", () => {
+  for (const html of [
+    fixed.replace('for="email"', 'for="other"'),
+    fixed.replace(">Correo electrónico</label>", "></label>"),
+    fixed.replace('id="email"', 'id="other"'),
+  ])
+    assert.equal(checkTicket(html).ok, false);
 });
-test('correct, false and duplicate accusations are distinct',()=>{
- const e:Evidence={id:'1',...observe(cases[0],'email','inspect',[])};
- assert.equal(evaluate(cases[0],e,'Etiqueta ausente',[]),'correct');
- assert.equal(evaluate(cases[0],e,'Falta de feedback',[]),'false');
- assert.equal(evaluate(cases[0],e,'Etiqueta ausente',['label']),'duplicate');
+test("delivery requires reproduction, inspection, a check and a successful registration", () => {
+  assert.equal(canDeliver(emptyProgress, fixed), false);
+  assert.equal(
+    canDeliver(
+      {
+        ...emptyProgress,
+        inspected: true,
+        reproduced: true,
+        tested: true,
+        registered: true,
+      },
+      fixed,
+    ),
+    true,
+  );
+  assert.equal(
+    canDeliver(
+      {
+        ...emptyProgress,
+        inspected: true,
+        reproduced: true,
+        tested: true,
+        registered: true,
+      },
+      starterFiles["index.html"],
+    ),
+    false,
+  );
 });
-test('all cases have unique crime ids and registered suspects',()=>{
- for(const c of cases){assert.equal(new Set(c.crimes.map(x=>x.id)).size,c.crimes.length);for(const crime of c.crimes){assert.ok(c.suspects[crime.suspect]);assert.ok(c.tools.includes(crime.tool))}}
+test("terminal handles only supported commands and reports missing files", () => {
+  assert.equal(terminalCommand("npm run dev", starterFiles).action, "start");
+  assert.equal(terminalCommand("npm test", starterFiles).action, "test");
+  assert.match(
+    terminalCommand("cat missing", starterFiles).lines[0],
+    /no existe/,
+  );
+  assert.match(
+    terminalCommand("rm -rf /", starterFiles).lines[0],
+    /no disponible/,
+  );
 });
