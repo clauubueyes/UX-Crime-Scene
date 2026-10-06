@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, lazy, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import {
   ArrowUpRight,
@@ -41,6 +41,7 @@ import {
   type Progress,
 } from "./workday";
 import "./style.css";
+const OfficeScene = lazy(() => import("./OfficeScene"));
 type AppName = "chat" | "browser" | "editor" | "tickets";
 function restore() {
   try {
@@ -98,7 +99,6 @@ function App() {
     [progress, setProgress] = useState(initial.progress),
     [screen, setScreen] = useState<"office" | "computer">("office"),
     [app, setApp] = useState<AppName>("chat"),
-    [position, setPosition] = useState({ x: 54, y: 76 }),
     [interaction, setInteraction] = useState<"notebook" | "coffee" | null>(
       null,
     ),
@@ -120,8 +120,7 @@ function App() {
     [finish, setFinish] = useState(false),
     [saved, setSaved] = useState(true),
     [help, setHelp] = useState(false);
-  const keys = useRef(new Set<string>()),
-    frame = useRef<HTMLIFrameElement>(null),
+  const frame = useRef<HTMLIFrameElement>(null),
     audio = useRef<AudioContext | null>(null),
     logEnd = useRef<HTMLDivElement>(null),
     toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -195,123 +194,36 @@ function App() {
     ping();
   }
   function openComputer() {
-    keys.current.clear();
     setScreen("computer");
     ping();
   }
-  const objects = [
-    {
-      id: "computer",
-      x: 54,
-      y: 62,
-      name: "Tu ordenador",
-      hint: "El primer ticket te está esperando.",
-    },
-    {
-      id: "notebook",
-      x: 25,
-      y: 69,
-      name: "Libreta de bienvenida",
-      hint: "Quizá alguien dejó instrucciones.",
-    },
-    {
-      id: "coffee",
-      x: 80,
-      y: 66,
-      name: "La máquina de café",
-      hint: "Una pausa también cuenta como trabajar.",
-    },
-  ];
-  const nearest = objects
-    .map((o) => ({ ...o, d: Math.hypot(position.x - o.x, position.y - o.y) }))
-    .sort((a, b) => a.d - b.d)[0];
-  function interact(id: string) {
+  function interact(id: "computer" | "notebook" | "coffee") {
     if (id === "computer") openComputer();
-    else setInteraction(id as "notebook" | "coffee");
+    else setInteraction(id);
   }
   useEffect(() => {
     function down(e: KeyboardEvent) {
       if (e.key === "Escape") {
+        if (document.pointerLockElement) return;
         e.preventDefault();
         if (help) setHelp(false);
         else if (interaction) setInteraction(null);
         else if (finish) setFinish(false);
         else if (screen === "computer") setScreen("office");
-        return;
       }
-      if ((e.target as HTMLElement).closest("input,textarea,select")) {
-        if (e.key === "s" && (e.ctrlKey || e.metaKey) && app === "editor") {
-          e.preventDefault();
-          save();
-        }
-        return;
-      }
-      if (screen !== "office" || interaction || help) return;
-      const k = e.key.toLowerCase();
       if (
-        [
-          "w",
-          "a",
-          "s",
-          "d",
-          "arrowup",
-          "arrowdown",
-          "arrowleft",
-          "arrowright",
-        ].includes(k)
+        (e.ctrlKey || e.metaKey) &&
+        e.key.toLowerCase() === "s" &&
+        screen === "computer" &&
+        app === "editor"
       ) {
         e.preventDefault();
-        keys.current.add(k);
+        save();
       }
-      if (k === "e" && nearest.d < 17) {
-        e.preventDefault();
-        interact(nearest.id);
-      }
-    }
-    function up(e: KeyboardEvent) {
-      keys.current.delete(e.key.toLowerCase());
-    }
-    function blur() {
-      keys.current.clear();
     }
     window.addEventListener("keydown", down);
-    window.addEventListener("keyup", up);
-    window.addEventListener("blur", blur);
-    return () => {
-      window.removeEventListener("keydown", down);
-      window.removeEventListener("keyup", up);
-      window.removeEventListener("blur", blur);
-    };
+    return () => window.removeEventListener("keydown", down);
   });
-  useEffect(() => {
-    if (screen !== "office" || interaction || help) return;
-    let id: number,
-      last = 0;
-    function tick(t: number) {
-      const dt = Math.min((t - last) / 1000, 0.04);
-      last = t;
-      const k = keys.current;
-      let dx =
-          Number(k.has("d") || k.has("arrowright")) -
-          Number(k.has("a") || k.has("arrowleft")),
-        dy =
-          Number(k.has("s") || k.has("arrowdown")) -
-          Number(k.has("w") || k.has("arrowup"));
-      if (dx || dy) {
-        const m = Math.hypot(dx, dy);
-        setPosition((p) => ({
-          x: Math.max(12, Math.min(88, p.x + (dx / m) * dt * 23)),
-          y: Math.max(61, Math.min(86, p.y + (dy / m) * dt * 23)),
-        }));
-      }
-      id = requestAnimationFrame(tick);
-    }
-    id = requestAnimationFrame(tick);
-    return () => {
-      cancelAnimationFrame(id);
-      keys.current.clear();
-    };
-  }, [screen, interaction, help]);
   useEffect(
     () => () => {
       if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -321,7 +233,6 @@ function App() {
   );
   useEffect(() => {
     if (!interaction && !help && !finish) return;
-    keys.current.clear();
     const previous = document.activeElement as HTMLElement;
     const dialog = document.querySelector<HTMLElement>("[role=dialog]");
     function trap(e: KeyboardEvent) {
@@ -450,157 +361,19 @@ function App() {
           </div>
           <div className="office-board">
             <div className="board-label">
-              <span className="green-dot" /> OFICINA / PLANTA 01{" "}
-              <span>EXPLORACIÓN LIBRE</span>
+              <span className="green-dot" /> OFICINA / PRIMERA PERSONA{" "}
+              <span>EXPLORACIÓN 3D</span>
             </div>
-            <div className="room">
-              <div className="back-wall">
-                <div className="window">
-                  <i />
-                  <i />
-                  <i />
-                </div>
-                <div className="wall-sign">
-                  forma<span>make things make sense.</span>
-                </div>
-                <div className="clock">
-                  <i />
-                </div>
-                <div className="poster">
-                  GOOD
-                  <br />
-                  THINGS
-                  <br />
-                  <em>take time.</em>
-                </div>
-              </div>
-              <div className="floor" />
-              <div className="rug" />
-              <div className="plant plant-one">
-                <i />
-                <i />
-                <i />
-                <span />
-              </div>
-              <div className="plant plant-two">
-                <i />
-                <i />
-                <i />
-                <span />
-              </div>
-              <div className="colleague-desk">
-                <div className="tiny-monitor" />
-                <div className="desk-surface" />
-                <div className="colleague-person">
-                  <i />
-                  <span />
-                </div>
-                <span className="colleague-label">MARTA · EN UNA CALL</span>
-              </div>
-              <button
-                className={`office-object main-desk ${nearest.id === "computer" && nearest.d < 17 ? "near" : ""}`}
-                onClick={() => {
-                  setPosition({ x: 54, y: 68 });
-                  openComputer();
-                }}
-                aria-label="Usar tu ordenador"
-              >
-                <div className="desk-surface" />
-                <div className="monitor-model">
-                  <div>
-                    <Code2 size={25} />
-                    <span>1 mensaje nuevo</span>
-                  </div>
-                  <i />
-                </div>
-                <div className="keyboard-model" />
-                <div className="mouse-model" />
-                <div className="desk-cup" />
-                <span className="object-label">
-                  TU PUESTO <kbd>E</kbd>
-                </span>
-                <div className="chair" />
-              </button>
-              <button
-                className="office-object notebook-object"
-                onClick={() => {
-                  setPosition({ x: 25, y: 72 });
-                  setInteraction("notebook");
-                }}
-                aria-label="Leer libreta de bienvenida"
-              >
-                <div className="side-table" />
-                <div className="notebook-model">
-                  <span>
-                    DON'T
-                    <br />
-                    PANIC.
-                  </span>
-                </div>
-                <span className="object-label">
-                  <BookOpen size={11} /> LIBRETA
-                </span>
-              </button>
-              <button
-                className="office-object coffee-object"
-                onClick={() => {
-                  setPosition({ x: 80, y: 72 });
-                  setInteraction("coffee");
-                }}
-                aria-label="Usar máquina de café"
-              >
-                <div className="cabinet" />
-                <div className="coffee-machine">
-                  <i />
-                  <span />
-                  <b>☕</b>
-                </div>
-                <span className="object-label">
-                  <Coffee size={11} /> CAFÉ
-                </span>
-              </button>
-              <div
-                className="player"
-                style={{ left: `${position.x}%`, top: `${position.y}%` }}
-              >
-                <span className="player-shadow" />
-                <div className="player-head">
-                  <i />
-                </div>
-                <div className="player-body" />
-                <div className="player-legs">
-                  <i />
-                  <i />
-                </div>
-                <span className="player-name">
-                  TÚ <span>JUNIOR</span>
-                </span>
-              </div>
-              <div className="room-coordinates">
-                FORMA HQ / 40°25′ N 3°42′ W
-              </div>
-            </div>
-            <div className="office-controls">
-              <div>
-                <kbd>W A S D</kbd>
-                <span>moverte</span>
-                <kbd>E</kbd>
-                <span>interactuar</span>
-              </div>
-              <p>
-                {nearest.d < 17 ? (
-                  <>
-                    <span className="green-dot" />
-                    <b>{nearest.name}</b> — {nearest.hint}
-                  </>
-                ) : (
-                  "Acércate a un objeto. También puedes hacer clic para interactuar."
-                )}
-              </p>
-              <button onClick={openComputer}>
-                Sentarte a trabajar <ArrowUpRight size={15} />
-              </button>
-            </div>
+            <Suspense
+              fallback={
+                <div className="scene-loading">Preparando la oficina…</div>
+              }
+            >
+              <OfficeScene
+                onInteract={interact}
+                paused={!!interaction || help || finish}
+              />
+            </Suspense>
           </div>
           <div className="office-bottom">
             <div
