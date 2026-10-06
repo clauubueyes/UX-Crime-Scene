@@ -1,15 +1,17 @@
 # UX Crime Scene — The Junior Files
 
-Simulador del primer trabajo de un junior. Oficina 3D en primera persona y ordenador con escritorio, chat del equipo, navegador inspirado en Chrome, editor inspirado en VS Code y terminal simulado. Primera jornada completa: reproducir un problema de registro, investigar el campo de correo, editar HTML, comprobar el cambio y entregarlo.
+Simulador del primer trabajo de un junior. Juego a pantalla completa con una oficina 3D en primera persona, tutorial contextual y un ordenador virtual con escritorio, ventanas y archivos. Primera jornada: reproducir un problema de registro, investigar el correo, editar HTML, comprobar el cambio y entregar el ticket.
 
 ## Ejecutar
 
 Node.js 22.12+ (validado con 24.19).
 
 ```sh
-npm ci --cache /tmp/ux-crime-npm --no-audit --no-fund
+npm ci
 npm run dev
 ```
+
+Detén los servidores de desarrollo antes de actualizar dependencias; Windows puede bloquear los binarios de esbuild y Rollup si siguen en uso.
 
 ```sh
 npm test
@@ -17,30 +19,43 @@ npm run build
 npm run preview
 ```
 
-Vercel: preset Vite, build `npm run build`, salida `dist`. Sin backend, claves ni base de datos. Google Fonts es opcional; hay fuentes locales de respaldo.
+Vercel: preset Vite, build `npm run build`, salida `dist`. Sin backend, claves, IA ni base de datos. Three.js y Monaco se cargan por separado cuando se necesitan. Monaco y sus workers se sirven localmente, sin depender de un CDN. Google Fonts es opcional y tiene fuentes de respaldo.
 
-## Jugar
+## Tutorial y controles
 
-- WASD/flechas: moverse por la oficina 3D. Arrastra sobre la escena para mirar, o usa Explorar con ratón para capturar el puntero (Esc lo libera). E: interactuar con el objeto cercano al que apuntas. Clic en objetos o accesos inferiores: interacción directa. En móvil hay controles táctiles.
-- El control TEXTURA ajusta el tramado y el grano de la escena, sin afectar al texto de las aplicaciones. Volver a tu puesto restablece la cámara.
-- Ordenador: chat, editor, navegador y tickets desde el dock.
-- En Code, ejecuta `npm run dev` en el terminal del juego. Abre Chrome y prueba un registro con una contraseña corta.
-- Abre DevTools e inspecciona el correo. La documentación y el chat ofrecen pistas.
-- Edita `index.html`: añade una etiqueta con texto y `for="email"`, conservando el campo. Guarda con el botón o Ctrl/⌘+S.
-- Ejecuta `npm test` dentro del juego y comprueba un registro válido en Chrome con la versión guardada.
-- Entrega desde el chat o ticket. La entrega requiere reproducción, inspección, corrección, comprobación y registro exitoso.
-- Esc vuelve a la oficina o cierra diálogos.
+El primer arranque ofrece un tutorial de nueve pasos. Avanza al realizar las acciones: sentarse, leer el encargo, iniciar el proyecto, reproducir, inspeccionar, corregir, comprobar, registrarse y entregar. Puedes minimizar la guía, salir o repetirla desde el HUD de la oficina, la barra de tareas o Inicio.
 
-El juego guarda archivos y progreso en `localStorage` (`ux-junior:v1`). Los procesos simulados se reinician al recargar: vuelve a ejecutar `npm run dev` dentro del juego. No se guardan los datos introducidos en el formulario. No uses datos personales. El prototipo contiene una jornada; el día 2 todavía no está implementado.
+- El juego ocupa toda la ventana. El botón **Pantalla completa** usa la API del navegador; Esc permite salir de ese modo.
+- WASD/flechas para caminar; arrastrar para mirar; **Explorar con ratón** captura el puntero. Esc lo libera.
+- Apunta a un objeto cercano y pulsa E; también hay accesos directos a ordenador, libreta y café y controles táctiles en móvil.
+- TEXTURA regula un grano suave; el filtrado de materiales evita el mosaico de la versión anterior.
+- En el ordenador, abre aplicaciones desde escritorio, Inicio o barra de tareas. Arrastra las barras de título y redimensiona desde la esquina inferior derecha. Minimizar conserva la aplicación; maximizar ocupa el escritorio; cerrar vuelve al escritorio.
 
-## Simulación y arquitectura
+## Ordenador virtual
 
-`src/workday.ts`: archivos iniciales, reglas del ticket y terminal de comandos permitidos.
-`src/main.tsx`: oficina, aplicaciones, guardado, edición, iframe y estados de la jornada.
-`src/OfficeScene.tsx`: escena Three.js, mobiliario, texturas procedurales, iluminación, colisiones, raycasting y postprocesado retro. Se carga por separado y libera sus recursos al salir.
-`src/style.css`: componentes adaptables, HUD y marco de monitor CRT.
-`src/engine.test.ts`: validación de correcciones, entrega y comandos.
+- **VS Code:** Monaco con resaltado, minimapa, autocompletado HTML/CSS, búsqueda, deshacer/rehacer, explorador y terminal integrado. Archivo, Editar, Ver y Terminal tienen acciones funcionales. Ctrl/⌘+S guarda el archivo.
+- **Chrome:** pestañas, nueva pestaña, cierre, barra de direcciones, atrás/adelante, recarga y DevTools del caso. La documentación se abre en otra pestaña. Cambiar de pestaña conserva el formulario del proyecto.
+- **Archivos:** documentos compartidos con VS Code, selección, vista previa y creación de archivos HTML/CSS/Markdown/texto.
+- **Equipo:** encargo de Marta, mensajes de texto con respuestas escritas para el caso, pistas y entrega.
+- **Tickets:** criterios de aceptación y seguimiento de las comprobaciones.
 
-El editor modifica HTML/CSS reales almacenados localmente; al guardar se reconstruye la página. El iframe se aísla con sandbox y CSP: se eliminan scripts, atributos de eventos y recursos externos del HTML editado. El registro usa un controlador predefinido, y se aceptan mensajes solo del iframe activo. No se ejecutan comandos de sistema ni JavaScript escrito por el jugador. El terminal y DevTools son simulaciones del primer ticket, no herramientas generales ni navegadores completos.
+Para jugar sin tutorial: en VS Code ejecuta `npm run dev` en el terminal **del juego**, abre Chrome y prueba un registro con una contraseña corta. Inspecciona el correo en DevTools. En `index.html`, añade `<label for="email">Correo electrónico</label>` antes del campo, guarda, ejecuta `npm test` dentro del juego y prueba el registro con 8 caracteres o más. Entrega en Equipo.
 
-La validación del ticket comprueba la asociación de etiqueta y campo; no es una auditoría de accesibilidad universal. El movimiento de primera persona evita las paredes y los principales muebles. No hay motor de física. La escena requiere WebGL; si no está disponible, los accesos a ordenador, libreta y café permiten continuar. Las texturas y los modelos se generan localmente: no hay descargas de assets ni servicios externos.
+El escritorio es una simulación de trabajo: no ejecuta programas del sistema ni comandos arbitrarios, y Chrome navega por las páginas del caso. La edición HTML/CSS y el formulario sí funcionan en el navegador. El primer día está implementado; las siguientes jornadas todavía no.
+
+## Guardado
+
+Archivos y progreso se guardan en `localStorage` (`ux-junior:v1`). La finalización u omisión del tutorial se guarda en `ux-tutorial:v2`. Las ventanas y procesos duran durante la sesión; al recargar debes volver a iniciar el servidor ficticio. No se guardan los datos del formulario. Usa datos ficticios.
+
+## Arquitectura
+
+- `src/main.tsx`: estado de jornada, aplicaciones y conexiones entre herramientas.
+- `src/Desktop.tsx` y `src/desktopState.ts`: escritorio, ventanas y acciones de su gestor.
+- `src/CodeEditor.tsx`: Monaco con workers locales y solo los lenguajes necesarios.
+- `src/useBrowser.ts`: pestañas, direcciones e historial del navegador virtual.
+- `src/Tutorial.tsx`: introducción y guía contextual.
+- `src/OfficeScene.tsx`: Three.js, texturas procedurales, iluminación, movimiento y raycasting. Libera los recursos al salir; sin WebGL puedes jugar mediante los accesos directos.
+- `src/workday.ts`: archivos iniciales, reglas del ticket y terminal de comandos permitidos.
+- `src/engine.test.ts`: evidencia de corrección, entrega, gestor de ventanas y rutas del navegador.
+
+La página editada usa un iframe con sandbox y CSP. Se eliminan scripts, atributos de eventos y recursos externos del HTML, y se aceptan mensajes solo del iframe del proyecto. El registro utiliza un controlador predefinido; la comprobación del ticket no es una auditoría universal de accesibilidad.

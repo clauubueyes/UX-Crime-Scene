@@ -40,9 +40,18 @@ import {
   emptyProgress,
   type Progress,
 } from "./workday";
+import { useBrowser, pageFor } from "./useBrowser";
+import Desktop from "./Desktop";
+import Tutorial from "./Tutorial";
+import {
+  windowAction,
+  type AppName,
+  type DesktopWindow,
+  type WindowAction,
+} from "./desktopState";
 import "./style.css";
 const OfficeScene = lazy(() => import("./OfficeScene"));
-type AppName = "chat" | "browser" | "editor" | "tickets";
+const CodeEditor = lazy(() => import("./CodeEditor"));
 function restore() {
   try {
     const s = JSON.parse(localStorage.getItem("ux-junior:v1") || "null");
@@ -75,7 +84,7 @@ function previewDocument(html: string, css: string) {
         el.removeAttribute(a.name);
   });
   const script = `document.querySelector('form')?.addEventListener('submit',e=>{e.preventDefault();const p=document.getElementById('password');const out=document.getElementById('feedback');if(p&&p.value.length<8){if(out)out.textContent='La contraseña debe tener al menos 8 caracteres.';parent.postMessage({type:'forma-result',ok:false},'*')}else{if(out)out.textContent='Cuenta creada. Bienvenido a Forma.';parent.postMessage({type:'forma-result',ok:true},'*')}});`;
-  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-forma'; form-action 'none'"><style>${css.replace(/<\/style/gi, "")}</style></head><body>${doc.body.innerHTML}<script nonce="forma">${script}</script></body></html>`;
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-dXgtY3JpbWUtc2NlbmU=' ; form-action 'none'"><style>${css.replace(/<\/style/gi, "")}</style></head><body>${doc.body.innerHTML}<script nonce="dXgtY3JpbWUtc2NlbmU=">${script}</script></body></html>`;
 }
 const applications = [
   {
@@ -95,10 +104,23 @@ const applications = [
 ];
 function App() {
   const [initial] = useState(restore);
+  const browser = useBrowser();
+  const pageTab = browser.current.page;
   const [files, setFiles] = useState(initial.files),
     [progress, setProgress] = useState(initial.progress),
     [screen, setScreen] = useState<"office" | "computer">("office"),
     [app, setApp] = useState<AppName>("chat"),
+    [windows, setWindows] = useState<DesktopWindow[]>([]),
+    [tutorial, setTutorial] = useState(() => {
+      try {
+        return localStorage.getItem("ux-tutorial:v2") === "done" ? 10 : 0;
+      } catch {
+        return 0;
+      }
+    }),
+    [tutorialCollapsed, setTutorialCollapsed] = useState(false),
+    [newFile, setNewFile] = useState(""),
+    [fullScreen, setFullScreen] = useState(false),
     [interaction, setInteraction] = useState<"notebook" | "coffee" | null>(
       null,
     ),
@@ -112,14 +134,20 @@ function App() {
     ]),
     [devtools, setDevtools] = useState(false),
     [url, setUrl] = useState("http://localhost:3000"),
-    [pageTab, setPageTab] = useState<"site" | "guide">("site"),
     [revision, setRevision] = useState(0),
     [messages, setMessages] = useState<string[]>([]),
+    [chatInput, setChatInput] = useState(""),
+    [editorMenu, setEditorMenu] = useState<string | null>(null),
+    [showExplorer, setShowExplorer] = useState(true),
+    [showTerminal, setShowTerminal] = useState(true),
     [toast, setToast] = useState(""),
     [sound, setSound] = useState(false),
     [finish, setFinish] = useState(false),
     [saved, setSaved] = useState(true),
     [help, setHelp] = useState(false);
+  const codeEditor = useRef<
+    import("monaco-editor").editor.IStandaloneCodeEditor | null
+  >(null);
   const frame = useRef<HTMLIFrameElement>(null),
     audio = useRef<AudioContext | null>(null),
     logEnd = useRef<HTMLDivElement>(null),
@@ -162,8 +190,10 @@ function App() {
     }
   }, [files, progress]);
   useEffect(() => {
-    logEnd.current?.scrollIntoView({ block: "nearest" });
-  }, [logs, app]);
+    const output = logEnd.current?.parentElement;
+    if (output) output.scrollTop = output.scrollHeight;
+  }, [logs]);
+
   useEffect(() => {
     function message(e: MessageEvent) {
       if (
@@ -183,7 +213,7 @@ function App() {
     }
     window.addEventListener("message", message);
     return () => window.removeEventListener("message", message);
-  });
+  }, [sound]);
   function save() {
     setFiles((p) => ({ ...p, [activeFile]: draft }));
     if (activeFile !== "README.md") {
@@ -203,8 +233,9 @@ function App() {
   }
   useEffect(() => {
     function down(e: KeyboardEvent) {
+      if (e.defaultPrevented || tutorial === 0) return;
       if (e.key === "Escape") {
-        if (document.pointerLockElement) return;
+        if (document.pointerLockElement || document.fullscreenElement) return;
         e.preventDefault();
         if (help) setHelp(false);
         else if (interaction) setInteraction(null);
@@ -232,7 +263,7 @@ function App() {
     [],
   );
   useEffect(() => {
-    if (!interaction && !help && !finish) return;
+    if (!interaction && !help && !finish && tutorial !== 0) return;
     const previous = document.activeElement as HTMLElement;
     const dialog = document.querySelector<HTMLElement>("[role=dialog]");
     function trap(e: KeyboardEvent) {
@@ -257,7 +288,7 @@ function App() {
       document.removeEventListener("keydown", trap);
       previous?.focus();
     };
-  }, [interaction, help, finish]);
+  }, [interaction, help, finish, tutorial]);
   function run(e: React.FormEvent) {
     e.preventDefault();
     const result = terminalCommand(command, files);
@@ -309,8 +340,935 @@ function App() {
     { done: progress.registered, text: "Comprobar el registro" },
     { done: progress.delivered, text: "Entregar al equipo" },
   ];
+
+  useEffect(
+    () => setUrl(browser.current.url),
+    [browser.active, browser.current.url],
+  );
+  function act(action: WindowAction) {
+    setWindows((ws) => windowAction(ws, action));
+    if (action.type === "open" || action.type === "raise") setApp(action.id);
+  }
+  function openApp(id: AppName) {
+    act({ type: "open", id });
+  }
+  async function toggleFullscreen() {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await document.documentElement.requestFullscreen();
+    } catch {
+      notify(
+        "El navegador no permite pantalla completa. El juego sigue ocupando toda la ventana.",
+      );
+    }
+  }
+  useEffect(() => {
+    const change = () => setFullScreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", change);
+    return () => document.removeEventListener("fullscreenchange", change);
+  }, []);
+  useEffect(() => {
+    const top = windows.filter((w) => !w.minimized).at(-1);
+    if (top) setApp(top.id);
+  }, [windows]);
+  function skipTutorial() {
+    setTutorial(10);
+    try {
+      localStorage.setItem("ux-tutorial:v2", "done");
+    } catch {}
+  }
+  useEffect(() => {
+    const conditions = [
+      false,
+      screen === "computer",
+      windows.some((w) => w.id === "chat" && !w.minimized),
+      server,
+      progress.reproduced,
+      progress.inspected,
+      valid,
+      progress.tested,
+      progress.registered,
+      progress.delivered,
+    ];
+    if (tutorial > 0 && tutorial < 10 && conditions[tutorial])
+      setTutorial((v) => v + 1);
+    if (tutorial === 10) {
+      try {
+        localStorage.setItem("ux-tutorial:v2", "done");
+      } catch {}
+    }
+  }, [tutorial, screen, windows, server, progress, valid]);
+  function tutorialAction() {
+    if (tutorial === 0) {
+      setTutorial(1);
+      return;
+    }
+    if (tutorial === 1) {
+      openComputer();
+      return;
+    }
+    openComputer();
+    const target: AppName =
+      tutorial === 2 || tutorial === 9
+        ? "chat"
+        : [3, 6, 7].includes(tutorial)
+          ? "editor"
+          : "browser";
+    openApp(target);
+    if (tutorial === 6) chooseFile("index.html");
+  }
+  function renderApplication(windowId: AppName) {
+    return (
+      <>
+        {" "}
+        {windowId === "chat" && (
+          <div className="chat-layout">
+            <aside className="chat-sidebar">
+              <h2>
+                forma<span>workspace</span>
+              </h2>
+              <div className="team-badge">
+                <span className="green-dot" /> 4 EN LÍNEA
+              </div>
+              <span className="sidebar-heading">CANALES</span>
+              <button className="channel active"># bienvenida</button>
+              <button
+                className="channel"
+                onClick={() =>
+                  notify(
+                    "El resto del equipo está en una reunión. Marta es tu contacto hoy.",
+                  )
+                }
+              >
+                # frontend
+              </button>
+              <button
+                className="channel"
+                onClick={() =>
+                  notify(
+                    "Mensaje fijado: el café es gratis. La paciencia también.",
+                  )
+                }
+              >
+                # random
+              </button>
+              <span className="sidebar-heading">MENSAJES DIRECTOS</span>
+              <button
+                className="channel"
+                onClick={() =>
+                  notify("Estás hablando con Marta en bienvenida.")
+                }
+              >
+                <span className="green-dot" /> Marta
+              </button>
+              <div className="chat-profile">
+                <span className="junior-avatar">J</span>
+                <div>
+                  Tu nombre aquí<small>Junior · aprendiendo</small>
+                </div>
+              </div>
+            </aside>
+            <section className="chat-main">
+              <div className="chat-heading">
+                <b># bienvenida</b>
+                <span>Tu primer día. Estamos contigo.</span>
+              </div>
+              <div className="chat-messages">
+                <div className="date-rule">LUNES · TU PRIMER DÍA</div>
+                <div className="message">
+                  <span className="marta-avatar">M</span>
+                  <div>
+                    <b>
+                      Marta <small>09:05</small>
+                      <span>PRODUCT LEAD</span>
+                    </b>
+                    <p>
+                      ¡Bienvenido a Forma! 🎉 Ya tienes tu ordenador preparado.
+                    </p>
+                    <p>
+                      Para empezar te dejamos algo sencillito: hay gente que no
+                      termina el registro. El campo de correo es un poco…
+                      misterioso.
+                    </p>
+                    <p>
+                      ¿Puedes reproducirlo, revisar qué pasa y dejarlo mejor?
+                      Sin prisa. Bueno, tenemos daily después 🙂
+                    </p>
+                    <button
+                      className="ticket-attachment"
+                      onClick={() => openApp("tickets")}
+                    >
+                      <ClipboardList size={19} />
+                      <div>
+                        <b>UX-001 · El misterio del registro</b>
+                        <span>Ver encargo y criterios de aceptación</span>
+                      </div>
+                      <ArrowUpRight size={15} />
+                    </button>
+                  </div>
+                </div>
+                <div className="message">
+                  <span className="colleague-avatar">N</span>
+                  <div>
+                    <b>
+                      Nico <small>09:07</small>
+                      <span>FRONTEND</span>
+                    </b>
+                    <p>
+                      El proyecto está en Code. Terminal →{" "}
+                      <code>npm run dev</code>. Después lo ves en Chrome. Si te
+                      pierdes, el README tiene un mapa.
+                    </p>
+                  </div>
+                </div>
+                {messages.map((m, i) => (
+                  <div className="message reply" key={i}>
+                    <span className="marta-avatar">M</span>
+                    <div>
+                      <p>{m}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="chat-compose">
+                <form
+                  className="chat-message-form"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const text = chatInput.trim();
+                    if (!text) return;
+                    const answer = /label|etiqueta|correo/i.test(text)
+                      ? 'NICO · La etiqueta necesita for="email", igual que el id del campo. Tienes un ejemplo en la documentación de Chrome.'
+                      : /terminal|arranc|servidor/i.test(text)
+                        ? "NICO · En VS Code, escribe npm run dev en el terminal. Luego abre localhost:3000 en Chrome."
+                        : /hola|buenas/i.test(text)
+                          ? "MARTA · ¡Hola! Bienvenido. Tienes el encargo UX-001 en Tickets."
+                          : /entreg|termin|listo/i.test(text)
+                            ? "MARTA · Genial. Usa Entregar cambio para que pueda revisar las comprobaciones."
+                            : "MARTA · Reproduce el registro y revisa el correo con DevTools. Si necesitas algo concreto, pregunta por la etiqueta o el terminal.";
+                    setMessages((p) => [...p, "TÚ · " + text, answer]);
+                    setChatInput("");
+                  }}
+                >
+                  <input
+                    aria-label="Mensaje al equipo"
+                    placeholder="Escribe un mensaje al equipo…"
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                  />
+                  <button aria-label="Enviar mensaje" type="submit">
+                    <Send size={16} />
+                  </button>
+                </form>
+                <span>¿Qué necesitas decir?</span>
+                <div>
+                  <button
+                    onClick={() =>
+                      setMessages((p) => [
+                        ...p,
+                        "TÚ · ¿Por dónde empiezo?",
+                        "MARTA · Abre Code, inicia la web con npm run dev y prueba un registro. En Chrome puedes abrir DevTools para investigar el correo.",
+                      ])
+                    }
+                  >
+                    <HelpCircle size={14} /> No sé por dónde empezar
+                  </button>
+                  <button
+                    onClick={() =>
+                      setMessages((p) => [
+                        ...p,
+                        "TÚ · ¿Qué significa asociar una etiqueta?",
+                        'NICO · El atributo for de un label debe coincidir con el id del input. Para este campo: for="email". Es HTML, no magia negra.',
+                      ])
+                    }
+                  >
+                    Pedir una pista
+                  </button>
+                  <button className="lime-button" onClick={deliver}>
+                    <Send size={14} /> Entregar cambio
+                  </button>
+                </div>
+              </div>
+            </section>
+          </div>
+        )}
+        {windowId === "editor" && (
+          <div className="vscode-application">
+            <div className="vscode-menubar">
+              <Code2 size={17} />
+              {[
+                ["file", "Archivo"],
+                ["edit", "Editar"],
+                ["view", "Ver"],
+                ["terminal", "Terminal"],
+                ["help", "Ayuda"],
+              ].map(([id, name]) => (
+                <div className="editor-menu" key={id}>
+                  <button
+                    onClick={() => setEditorMenu(editorMenu === id ? null : id)}
+                  >
+                    {name}
+                  </button>
+                  {editorMenu === id && (
+                    <div className="editor-menu-items">
+                      {id === "file" ? (
+                        <>
+                          <button
+                            onClick={() => {
+                              openApp("files");
+                              setEditorMenu(null);
+                            }}
+                          >
+                            Nuevo archivo…
+                          </button>
+                          <button
+                            onClick={() => {
+                              save();
+                              setEditorMenu(null);
+                            }}
+                          >
+                            Guardar <kbd>Ctrl+S</kbd>
+                          </button>
+                          <button
+                            onClick={() => {
+                              act({ type: "close", id: "editor" });
+                              setEditorMenu(null);
+                            }}
+                          >
+                            Cerrar ventana
+                          </button>
+                        </>
+                      ) : id === "edit" ? (
+                        <>
+                          <button
+                            onClick={() => {
+                              codeEditor.current?.trigger("menu", "undo", null);
+                              setEditorMenu(null);
+                            }}
+                          >
+                            Deshacer <kbd>Ctrl+Z</kbd>
+                          </button>
+                          <button
+                            onClick={() => {
+                              codeEditor.current?.trigger("menu", "redo", null);
+                              setEditorMenu(null);
+                            }}
+                          >
+                            Rehacer <kbd>Ctrl+Y</kbd>
+                          </button>
+                          <button
+                            onClick={() => {
+                              void codeEditor.current
+                                ?.getAction("actions.find")
+                                ?.run();
+                              setEditorMenu(null);
+                            }}
+                          >
+                            Buscar <kbd>Ctrl+F</kbd>
+                          </button>
+                        </>
+                      ) : id === "view" ? (
+                        <>
+                          <button
+                            onClick={() => {
+                              setShowExplorer((v) => !v);
+                              setEditorMenu(null);
+                            }}
+                          >
+                            Mostrar / ocultar explorador
+                          </button>
+                          <button
+                            onClick={() => {
+                              setShowTerminal((v) => !v);
+                              setEditorMenu(null);
+                            }}
+                          >
+                            Mostrar / ocultar terminal
+                          </button>
+                        </>
+                      ) : id === "terminal" ? (
+                        <>
+                          <button
+                            onClick={() => {
+                              setShowTerminal(true);
+                              setEditorMenu(null);
+                              setTimeout(
+                                () =>
+                                  document.getElementById("command")?.focus(),
+                                0,
+                              );
+                            }}
+                          >
+                            Mostrar terminal
+                          </button>
+                          <button
+                            onClick={() => {
+                              setLogs([]);
+                              setEditorMenu(null);
+                            }}
+                          >
+                            Limpiar terminal
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            setTutorial(3);
+                            setTutorialCollapsed(false);
+                            setEditorMenu(null);
+                          }}
+                        >
+                          Abrir guía del primer día
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+              <button className="menu-save" onClick={save}>
+                <Save size={12} />
+                Guardar
+              </button>
+            </div>
+            <div className="editor-layout">
+              <aside
+                className="editor-sidebar"
+                style={{ display: showExplorer ? undefined : "none" }}
+              >
+                <div className="editor-activity">
+                  <Code2 size={21} />
+                  <Search size={19} />
+                  <Folder size={19} />
+                </div>
+                <div className="file-tree">
+                  <span>EXPLORADOR</span>
+                  <b>
+                    <ChevronRight size={12} /> FORMA-WEB
+                  </b>
+                  {Object.keys(files).map((f) => (
+                    <button
+                      key={f}
+                      className={activeFile === f ? "active" : ""}
+                      onClick={() => chooseFile(f)}
+                    >
+                      {f.endsWith(".md") ? (
+                        <FileText size={13} />
+                      ) : (
+                        <FileCode size={13} />
+                      )}{" "}
+                      {f}
+                    </button>
+                  ))}
+                  <div className="editor-tip">
+                    Un archivo guardado
+                    <br />
+                    es un cambio real.
+                    <br />
+                    <span>Ctrl / ⌘ + S</span>
+                  </div>
+                </div>
+              </aside>
+              <div className="editor-main">
+                <div className="editor-tabs">
+                  <span>
+                    <FileCode size={13} />
+                    {activeFile} {dirty && "●"}
+                  </span>
+                  <button onClick={save}>
+                    <Save size={13} /> Guardar
+                  </button>
+                </div>
+                <div className="editor-path">
+                  forma-web <ChevronRight size={11} /> {activeFile}
+                </div>
+                <div className="code-area">
+                  <Suspense
+                    fallback={
+                      <div className="editor-loading">Abriendo VS Code…</div>
+                    }
+                  >
+                    <CodeEditor
+                      file={activeFile}
+                      value={draft}
+                      onChange={setDraft}
+                      onSave={save}
+                      onReady={(editor) => (codeEditor.current = editor)}
+                    />
+                  </Suspense>
+                </div>
+                <div
+                  className="terminal-pane"
+                  style={{ display: showTerminal ? undefined : "none" }}
+                >
+                  <div className="terminal-tabs">
+                    <span>PROBLEMAS</span>
+                    <b>TERMINAL</b>
+                    <span>OUTPUT</span>
+                    <Terminal size={13} />
+                  </div>
+                  <div className="terminal-output">
+                    {logs.map((l, i) => (
+                      <div
+                        key={i}
+                        className={
+                          l.includes("PASS")
+                            ? "pass"
+                            : l.startsWith("junior@")
+                              ? "prompt"
+                              : ""
+                        }
+                      >
+                        {l}
+                      </div>
+                    ))}
+                    <div ref={logEnd} />
+                  </div>
+                  <form className="terminal-input" onSubmit={run}>
+                    <label htmlFor="command">junior@forma:~$</label>
+                    <input
+                      id="command"
+                      aria-label="Comando del terminal"
+                      value={command}
+                      onChange={(e) => setCommand(e.target.value)}
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                    <button type="submit" aria-label="Ejecutar comando">
+                      <ArrowRight size={13} />
+                    </button>
+                  </form>
+                </div>
+                <div className="editor-status">
+                  <span>
+                    main* <span>✓ HTML</span>
+                  </span>
+                  <span>
+                    {dirty ? "SIN GUARDAR" : "GUARDADO"} · UTF-8 ·{" "}
+                    {activeFile.endsWith(".css")
+                      ? "CSS"
+                      : activeFile.endsWith(".md")
+                        ? "Markdown"
+                        : "HTML"}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+        {windowId === "browser" && (
+          <div className="browser-layout">
+            <div className="browser-tabs">
+              {browser.tabs.map((tab) => {
+                const page = pageFor(tab.history[tab.index]);
+                return (
+                  <div
+                    key={tab.id}
+                    className={`chrome-tab ${browser.active === tab.id ? "active" : ""}`}
+                  >
+                    <button onClick={() => browser.select(tab.id)}>
+                      <Globe size={12} />
+                      {page === "site"
+                        ? "Forma · Registro"
+                        : page === "guide"
+                          ? "HTML: etiquetas"
+                          : page === "new"
+                            ? "Nueva pestaña"
+                            : "Página no disponible"}
+                    </button>
+                    <button
+                      aria-label={`Cerrar pestaña ${page === "site" ? "Forma" : page === "guide" ? "Documentación" : tab.id}`}
+                      onClick={() => browser.close(tab.id)}
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                );
+              })}
+              <button
+                className="chrome-new-tab"
+                aria-label="Nueva pestaña"
+                onClick={() => browser.newTab()}
+              >
+                +
+              </button>
+            </div>
+            <div className="address-bar">
+              <button
+                aria-label="Atrás"
+                disabled={browser.current.index === 0}
+                onClick={() => browser.history(-1)}
+              >
+                <ArrowLeft size={15} />
+              </button>
+              <button
+                aria-label="Adelante"
+                disabled={
+                  browser.current.index === browser.current.history.length - 1
+                }
+                onClick={() => browser.history(1)}
+              >
+                <ArrowRight size={15} />
+              </button>
+              <button
+                aria-label="Recargar navegador"
+                onClick={() => {
+                  setRevision((v) => v + 1);
+                  notify("Página recargada con los archivos guardados.");
+                }}
+              >
+                <RefreshCw size={14} />
+              </button>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  browser.navigate(url);
+                }}
+              >
+                <Lock size={11} />
+                <input
+                  aria-label="Dirección del navegador"
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                />
+              </form>
+              <button
+                className={devtools ? "devtools-on" : ""}
+                onClick={() => setDevtools((v) => !v)}
+              >
+                <Code2 size={14} /> DevTools
+              </button>
+            </div>
+            <div className="browser-body">
+              <div className="web-content">
+                {server && (
+                  <iframe
+                    key={revision}
+                    ref={frame}
+                    title="Web ficticia de Forma"
+                    sandbox="allow-scripts allow-forms"
+                    style={{ display: pageTab === "site" ? "block" : "none" }}
+                    srcDoc={previewDocument(
+                      files["index.html"],
+                      files["styles.css"],
+                    )}
+                  />
+                )}
+                {pageTab === "new" ? (
+                  <div className="chrome-start">
+                    <h2>
+                      <span>G</span>
+                      <span>o</span>
+                      <span>o</span>
+                      <span>g</span>
+                      <span>l</span>
+                      <span>e</span>
+                    </h2>
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        browser.navigate(url);
+                      }}
+                    >
+                      <Search size={17} />
+                      <input
+                        aria-label="Buscar o escribir una dirección"
+                        placeholder="Buscar o escribir una dirección"
+                        value={url === "chrome://newtab" ? "" : url}
+                        onChange={(e) => setUrl(e.target.value)}
+                      />
+                    </form>
+                    <button
+                      onClick={() => browser.navigate("http://localhost:3000")}
+                    >
+                      <Globe size={21} />
+                      Forma · localhost:3000
+                    </button>
+                  </div>
+                ) : pageTab === "error" ? (
+                  <div className="connection-error">
+                    <Globe size={42} />
+                    <h2>No se puede acceder a este sitio.</h2>
+                    <p>
+                      Esta dirección no está disponible en el ordenador del
+                      juego.
+                    </p>
+                    <code>ERR_NAME_NOT_RESOLVED</code>
+                    <button
+                      className="lime-button"
+                      onClick={() => browser.navigate("http://localhost:3000")}
+                    >
+                      Abrir proyecto local
+                    </button>
+                  </div>
+                ) : pageTab === "guide" ? (
+                  <div className="docs">
+                    <span className="eyebrow">
+                      FORMA / MANUAL DE SUPERVIVENCIA
+                    </span>
+                    <h2>Un input no se presenta solo.</h2>
+                    <p>
+                      El placeholder es una pista temporal: al escribir
+                      desaparece. La etiqueta permanece y le da un nombre al
+                      campo.
+                    </p>
+                    <pre>
+                      {
+                        '<label for="email">Correo electrónico</label>\n<input id="email" type="email">'
+                      }
+                    </pre>
+                    <p>
+                      <code>for</code> e <code>id</code> deben coincidir. Guarda
+                      en Code y vuelve a comprobarlo aquí.
+                    </p>
+                    <button
+                      className="lime-button"
+                      onClick={() => openApp("editor")}
+                    >
+                      Volver al editor <ArrowUpRight size={14} />
+                    </button>
+                  </div>
+                ) : server ? (
+                  <></>
+                ) : (
+                  <div className="connection-error">
+                    <Globe size={42} />
+                    <h2>No se puede acceder a este sitio.</h2>
+                    <p>localhost ha rechazado la conexión.</p>
+                    <code>ERR_CONNECTION_REFUSED</code>
+                    <p>
+                      El servidor no está iniciado. Abre Code y ejecuta{" "}
+                      <b>npm run dev</b> en el terminal.
+                    </p>
+                    <button
+                      onClick={() => openApp("editor")}
+                      className="lime-button"
+                    >
+                      Abrir Code <ArrowRight size={14} />
+                    </button>
+                  </div>
+                )}
+              </div>
+              {devtools && (
+                <aside className="devtools">
+                  <div>
+                    <b>ELEMENTS</b>
+                    <span>ACCESSIBILITY</span>
+                    <button
+                      aria-label="Cerrar DevTools"
+                      onClick={() => setDevtools(false)}
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                  <p>INSPECTOR DE LA ESCENA</p>
+                  <button
+                    onClick={() => {
+                      if (!server) {
+                        notify(
+                          "Inicia el servidor antes de inspeccionar la web.",
+                        );
+                        return;
+                      }
+                      mark("inspected");
+                      notify(
+                        "Campo inspeccionado. Revisa su nombre accesible y su etiqueta.",
+                      );
+                    }}
+                  >
+                    <Search size={14} /> Inspeccionar correo
+                  </button>
+                  {progress.inspected && (
+                    <>
+                      <pre>
+                        {
+                          '<input id="email"\n  type="email"\n  placeholder="Correo…">'
+                        }
+                      </pre>
+                      <dl>
+                        <dt>Role</dt>
+                        <dd>textbox</dd>
+                        <dt>Etiqueta asociada</dt>
+                        <dd className={valid ? "good" : "bad"}>
+                          {valid ? "Correo electrónico" : "No encontrada"}
+                        </dd>
+                        <dt>Nombre accesible</dt>
+                        <dd>
+                          {valid
+                            ? "Texto de la etiqueta"
+                            : "Solo placeholder (frágil)"}
+                        </dd>
+                      </dl>
+                      <p className="devtools-note">
+                        El placeholder desaparece al escribir. ¿Qué le falta al
+                        campo?
+                      </p>
+                      <button
+                        onClick={() => {
+                          browser.openPage("guide");
+                        }}
+                      >
+                        <BookOpen size={13} /> Consultar documentación
+                      </button>
+                    </>
+                  )}
+                </aside>
+              )}
+            </div>
+          </div>
+        )}
+        {windowId === "tickets" && (
+          <div className="tickets-layout">
+            <aside>
+              <h2>
+                Trabajo<span>Tu cola de hoy</span>
+              </h2>
+              <button className="ticket-nav">
+                <span className="green-dot" /> UX-001 <ChevronRight size={14} />
+              </button>
+              <div className="next-ticket">
+                <Lock size={16} />
+                <span>
+                  Día 02
+                  <br />
+                  <small>Próximamente</small>
+                </span>
+              </div>
+            </aside>
+            <section className="ticket-detail">
+              <div className="ticket-meta">
+                UX-001{" "}
+                <span>{progress.delivered ? "COMPLETADO" : "EN CURSO"}</span>
+                <b>P2 · ONBOARDING</b>
+              </div>
+              <h2>El misterio del registro.</h2>
+              <p>
+                Al escribir el correo, desaparece la única indicación de qué es
+                ese campo. Las personas pierden el contexto. Necesitamos una
+                etiqueta visible y asociada, conservando el registro.
+              </p>
+              <div className="ticket-author">
+                <span className="marta-avatar">M</span>
+                <span>
+                  Asignado por Marta <b>→ Tú</b>
+                </span>
+              </div>
+              <h3>Antes de entregar</h3>
+              <div className="checklist">
+                {steps.map((s) => (
+                  <div key={s.text}>
+                    <span className={s.done ? "checked" : ""}>
+                      {s.done ? <Check size={12} /> : null}
+                    </span>
+                    {s.text}
+                  </div>
+                ))}
+              </div>
+              <div className="scope-note">
+                <BookOpen size={17} />
+                <p>
+                  No hay que reescribir la aplicación. Encuentra el cambio más
+                  pequeño que resuelva el problema.
+                </p>
+              </div>
+              <button
+                className="lime-button"
+                onClick={() => {
+                  openApp("chat");
+                  deliver();
+                }}
+              >
+                Entregar al equipo <Send size={14} />
+              </button>
+            </section>
+          </div>
+        )}
+        {windowId === "files" && (
+          <div className="file-manager">
+            <div className="files-toolbar">
+              <Folder size={18} />
+              <span>Este equipo / Proyectos / forma-web</span>
+              <button
+                onClick={() => {
+                  chooseFile(activeFile);
+                  openApp("editor");
+                }}
+              >
+                <Code2 size={14} /> Abrir en VS Code
+              </button>
+            </div>
+            <div className="file-manager-body">
+              <aside>
+                <b>Acceso rápido</b>
+                <span>Escritorio</span>
+                <span>Documentos</span>
+                <span className="active">forma-web</span>
+              </aside>
+              <section>
+                <div className="files-column-head">
+                  <span>Nombre</span>
+                  <span>Tipo</span>
+                  <span>Tamaño</span>
+                </div>
+                {Object.entries(files).map(([name, text]) => (
+                  <button
+                    key={name}
+                    className={activeFile === name ? "selected-file" : ""}
+                    onClick={() => chooseFile(name)}
+                    onDoubleClick={() => {
+                      chooseFile(name);
+                      openApp("editor");
+                    }}
+                  >
+                    <span>
+                      <FileCode size={17} />
+                      {name}
+                    </span>
+                    <span>{name.split(".").at(-1)?.toUpperCase()}</span>
+                    <span>{new TextEncoder().encode(text).length} B</span>
+                  </button>
+                ))}
+                <form
+                  className="new-file"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const name = newFile.trim();
+                    if (
+                      !/^[a-zA-Z0-9_-]+\.(html|css|md|txt)$/.test(name) ||
+                      name in files
+                    ) {
+                      notify(
+                        "Usa un nombre nuevo terminado en .html, .css, .md o .txt.",
+                      );
+                      return;
+                    }
+                    setFiles((p) => ({ ...p, [name]: "" }));
+                    setNewFile("");
+                    notify("Archivo creado en forma-web.");
+                  }}
+                >
+                  <input
+                    aria-label="Nombre del nuevo archivo"
+                    value={newFile}
+                    onChange={(e) => setNewFile(e.target.value)}
+                    placeholder="notas.txt"
+                  />
+                  <button type="submit">Nuevo archivo</button>
+                </form>
+                <div className="file-preview">
+                  <span>VISTA PREVIA · {activeFile}</span>
+                  <pre>{files[activeFile]}</pre>
+                </div>
+              </section>
+            </div>
+          </div>
+        )}
+      </>
+    );
+  }
   return (
-    <div className={`game ${screen}`}>
+    <div
+      className={`game ${screen} ${tutorial > 0 && tutorial < 10 && !tutorialCollapsed ? "with-tutorial" : ""}`}
+    >
       <header className="game-header">
         <a
           className="wordmark"
@@ -326,6 +1284,23 @@ function App() {
           <span /> DÍA 01 <i /> TU PRIMER TRABAJO
         </div>
         <div className="header-actions">
+          <button
+            aria-label={
+              fullScreen ? "Salir de pantalla completa" : "Pantalla completa"
+            }
+            onClick={toggleFullscreen}
+          >
+            <Maximize2 size={17} />
+          </button>
+          <button
+            aria-label="Repetir tutorial"
+            onClick={() => {
+              setTutorial(0);
+              setTutorialCollapsed(false);
+            }}
+          >
+            <BookOpen size={17} />
+          </button>
           <button
             aria-label={sound ? "Desactivar sonido" : "Activar sonido"}
             onClick={() => setSound((v) => !v)}
@@ -371,7 +1346,7 @@ function App() {
             >
               <OfficeScene
                 onInteract={interact}
-                paused={!!interaction || help || finish}
+                paused={!!interaction || help || finish || tutorial === 0}
               />
             </Suspense>
           </div>
@@ -380,14 +1355,14 @@ function App() {
               className="incoming-message"
               onClick={() => {
                 openComputer();
-                setApp("chat");
+                openApp("chat");
               }}
               role="button"
               tabIndex={0}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   openComputer();
-                  setApp("chat");
+                  openApp("chat");
                 }
               }}
             >
@@ -419,629 +1394,27 @@ function App() {
         </main>
       ) : (
         <main className="computer-layout">
-          <div className="computer-title">
-            <button onClick={() => setScreen("office")}>
-              <ArrowLeft size={14} /> Volver a la oficina <kbd>ESC</kbd>
-            </button>
-            <span>
-              FORMA WORKSTATION <i /> JUNIOR@FORMA
-            </span>
-            <span className="green-dot" />
-          </div>
-          <div className="desktop">
-            <div className="desktop-top">
-              <span>
-                <span className="desktop-logo">f.</span> Forma OS
-              </span>
-              <b>{applications.find((a) => a.id === app)?.name}</b>
-              <span>
-                Lun 09:12 <span className="green-dot" />
-              </span>
-            </div>
-            <div className="desktop-content">
-              <div className={`application-window ${app}`}>
-                <div className="window-chrome">
-                  <div className="window-controls">
-                    <button
-                      aria-label="Cerrar aplicación y volver a oficina"
-                      onClick={() => setScreen("office")}
-                    >
-                      <X size={10} />
-                    </button>
-                    <button
-                      aria-label="Ir al chat"
-                      onClick={() => setApp("chat")}
-                    >
-                      <Minus size={10} />
-                    </button>
-                    <span>
-                      <Maximize2 size={9} />
-                    </span>
-                  </div>
-                  <span>
-                    {app === "editor"
-                      ? `${activeFile}${dirty ? " ●" : ""} — forma-web — Code`
-                      : app === "browser"
-                        ? "Forma — Chrome"
-                        : app === "chat"
-                          ? "Forma / Equipo"
-                          : "Tickets / Tu trabajo"}
-                  </span>
-                  <span className="window-simulation">SIMULACIÓN LOCAL</span>
-                </div>
-                {app === "chat" && (
-                  <div className="chat-layout">
-                    <aside className="chat-sidebar">
-                      <h2>
-                        forma<span>workspace</span>
-                      </h2>
-                      <div className="team-badge">
-                        <span className="green-dot" /> 4 EN LÍNEA
-                      </div>
-                      <span className="sidebar-heading">CANALES</span>
-                      <button className="channel active"># bienvenida</button>
-                      <button
-                        className="channel"
-                        onClick={() =>
-                          notify(
-                            "El resto del equipo está en una reunión. Marta es tu contacto hoy.",
-                          )
-                        }
-                      >
-                        # frontend
-                      </button>
-                      <button
-                        className="channel"
-                        onClick={() =>
-                          notify(
-                            "Mensaje fijado: el café es gratis. La paciencia también.",
-                          )
-                        }
-                      >
-                        # random
-                      </button>
-                      <span className="sidebar-heading">MENSAJES DIRECTOS</span>
-                      <button
-                        className="channel"
-                        onClick={() =>
-                          notify("Estás hablando con Marta en bienvenida.")
-                        }
-                      >
-                        <span className="green-dot" /> Marta
-                      </button>
-                      <div className="chat-profile">
-                        <span className="junior-avatar">J</span>
-                        <div>
-                          Tu nombre aquí<small>Junior · aprendiendo</small>
-                        </div>
-                      </div>
-                    </aside>
-                    <section className="chat-main">
-                      <div className="chat-heading">
-                        <b># bienvenida</b>
-                        <span>Tu primer día. Estamos contigo.</span>
-                      </div>
-                      <div className="chat-messages">
-                        <div className="date-rule">LUNES · TU PRIMER DÍA</div>
-                        <div className="message">
-                          <span className="marta-avatar">M</span>
-                          <div>
-                            <b>
-                              Marta <small>09:05</small>
-                              <span>PRODUCT LEAD</span>
-                            </b>
-                            <p>
-                              ¡Bienvenido a Forma! 🎉 Ya tienes tu ordenador
-                              preparado.
-                            </p>
-                            <p>
-                              Para empezar te dejamos algo sencillito: hay gente
-                              que no termina el registro. El campo de correo es
-                              un poco… misterioso.
-                            </p>
-                            <p>
-                              ¿Puedes reproducirlo, revisar qué pasa y dejarlo
-                              mejor? Sin prisa. Bueno, tenemos daily después 🙂
-                            </p>
-                            <button
-                              className="ticket-attachment"
-                              onClick={() => setApp("tickets")}
-                            >
-                              <ClipboardList size={19} />
-                              <div>
-                                <b>UX-001 · El misterio del registro</b>
-                                <span>
-                                  Ver encargo y criterios de aceptación
-                                </span>
-                              </div>
-                              <ArrowUpRight size={15} />
-                            </button>
-                          </div>
-                        </div>
-                        <div className="message">
-                          <span className="colleague-avatar">N</span>
-                          <div>
-                            <b>
-                              Nico <small>09:07</small>
-                              <span>FRONTEND</span>
-                            </b>
-                            <p>
-                              El proyecto está en Code. Terminal →{" "}
-                              <code>npm run dev</code>. Después lo ves en
-                              Chrome. Si te pierdes, el README tiene un mapa.
-                            </p>
-                          </div>
-                        </div>
-                        {messages.map((m, i) => (
-                          <div className="message reply" key={i}>
-                            <span className="marta-avatar">M</span>
-                            <div>
-                              <p>{m}</p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                      <div className="chat-compose">
-                        <span>¿Qué necesitas decir?</span>
-                        <div>
-                          <button
-                            onClick={() =>
-                              setMessages((p) => [
-                                ...p,
-                                "TÚ · ¿Por dónde empiezo?",
-                                "MARTA · Abre Code, inicia la web con npm run dev y prueba un registro. En Chrome puedes abrir DevTools para investigar el correo.",
-                              ])
-                            }
-                          >
-                            <HelpCircle size={14} /> No sé por dónde empezar
-                          </button>
-                          <button
-                            onClick={() =>
-                              setMessages((p) => [
-                                ...p,
-                                "TÚ · ¿Qué significa asociar una etiqueta?",
-                                'NICO · El atributo for de un label debe coincidir con el id del input. Para este campo: for="email". Es HTML, no magia negra.',
-                              ])
-                            }
-                          >
-                            Pedir una pista
-                          </button>
-                          <button className="lime-button" onClick={deliver}>
-                            <Send size={14} /> Entregar cambio
-                          </button>
-                        </div>
-                      </div>
-                    </section>
-                  </div>
-                )}
-                {app === "editor" && (
-                  <div className="editor-layout">
-                    <aside className="editor-sidebar">
-                      <div className="editor-activity">
-                        <Code2 size={21} />
-                        <Search size={19} />
-                        <Folder size={19} />
-                      </div>
-                      <div className="file-tree">
-                        <span>EXPLORADOR</span>
-                        <b>
-                          <ChevronRight size={12} /> FORMA-WEB
-                        </b>
-                        {Object.keys(files).map((f) => (
-                          <button
-                            key={f}
-                            className={activeFile === f ? "active" : ""}
-                            onClick={() => chooseFile(f)}
-                          >
-                            {f.endsWith(".md") ? (
-                              <FileText size={13} />
-                            ) : (
-                              <FileCode size={13} />
-                            )}{" "}
-                            {f}
-                          </button>
-                        ))}
-                        <div className="editor-tip">
-                          Un archivo guardado
-                          <br />
-                          es un cambio real.
-                          <br />
-                          <span>Ctrl / ⌘ + S</span>
-                        </div>
-                      </div>
-                    </aside>
-                    <div className="editor-main">
-                      <div className="editor-tabs">
-                        <span>
-                          <FileCode size={13} />
-                          {activeFile} {dirty && "●"}
-                        </span>
-                        <button onClick={save}>
-                          <Save size={13} /> Guardar
-                        </button>
-                      </div>
-                      <div className="editor-path">
-                        forma-web <ChevronRight size={11} /> {activeFile}
-                      </div>
-                      <div className="code-area">
-                        <div className="line-numbers" aria-hidden="true">
-                          {draft.split("\n").map((_, i) => (
-                            <span key={i}>{i + 1}</span>
-                          ))}
-                        </div>
-                        <textarea
-                          aria-label={`Editar ${activeFile}`}
-                          spellCheck={false}
-                          value={draft}
-                          onChange={(e) => setDraft(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Tab") {
-                              e.preventDefault();
-                              const el = e.currentTarget,
-                                a = el.selectionStart,
-                                b = el.selectionEnd;
-                              setDraft(
-                                draft.slice(0, a) + "  " + draft.slice(b),
-                              );
-                              requestAnimationFrame(() => {
-                                el.selectionStart = el.selectionEnd = a + 2;
-                              });
-                            }
-                          }}
-                        />
-                      </div>
-                      <div className="terminal-pane">
-                        <div className="terminal-tabs">
-                          <span>PROBLEMAS</span>
-                          <b>TERMINAL</b>
-                          <span>OUTPUT</span>
-                          <Terminal size={13} />
-                        </div>
-                        <div className="terminal-output">
-                          {logs.map((l, i) => (
-                            <div
-                              key={i}
-                              className={
-                                l.includes("PASS")
-                                  ? "pass"
-                                  : l.startsWith("junior@")
-                                    ? "prompt"
-                                    : ""
-                              }
-                            >
-                              {l}
-                            </div>
-                          ))}
-                          <div ref={logEnd} />
-                        </div>
-                        <form className="terminal-input" onSubmit={run}>
-                          <label htmlFor="command">junior@forma:~$</label>
-                          <input
-                            id="command"
-                            aria-label="Comando del terminal"
-                            value={command}
-                            onChange={(e) => setCommand(e.target.value)}
-                            autoComplete="off"
-                            spellCheck={false}
-                          />
-                          <button type="submit" aria-label="Ejecutar comando">
-                            <ArrowRight size={13} />
-                          </button>
-                        </form>
-                      </div>
-                      <div className="editor-status">
-                        <span>
-                          main* <span>✓ HTML</span>
-                        </span>
-                        <span>
-                          {dirty ? "SIN GUARDAR" : "GUARDADO"} · UTF-8 ·{" "}
-                          {activeFile.endsWith(".css")
-                            ? "CSS"
-                            : activeFile.endsWith(".md")
-                              ? "Markdown"
-                              : "HTML"}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                )}
-                {app === "browser" && (
-                  <div className="browser-layout">
-                    <div className="browser-tabs">
-                      <button
-                        className={pageTab === "site" ? "active" : ""}
-                        onClick={() => setPageTab("site")}
-                      >
-                        <Globe size={12} /> Forma · Registro <span>×</span>
-                      </button>
-                      <button
-                        className={pageTab === "guide" ? "active" : ""}
-                        onClick={() => setPageTab("guide")}
-                      >
-                        <BookOpen size={12} /> HTML: etiquetas
-                      </button>
-                    </div>
-                    <div className="address-bar">
-                      <button
-                        aria-label="Recargar navegador"
-                        onClick={() => {
-                          setRevision((v) => v + 1);
-                          notify(
-                            "Página recargada con los archivos guardados.",
-                          );
-                        }}
-                      >
-                        <RefreshCw size={14} />
-                      </button>
-                      <form
-                        onSubmit={(e) => {
-                          e.preventDefault();
-                          if (url.includes("localhost:3000"))
-                            setPageTab("site");
-                          else if (url === "forma://docs") setPageTab("guide");
-                          else
-                            notify(
-                              "Este navegador simula localhost:3000 y forma://docs. No navega por Internet.",
-                            );
-                        }}
-                      >
-                        <Lock size={11} />
-                        <input
-                          aria-label="Dirección del navegador"
-                          value={url}
-                          onChange={(e) => setUrl(e.target.value)}
-                        />
-                      </form>
-                      <button
-                        className={devtools ? "devtools-on" : ""}
-                        onClick={() => setDevtools((v) => !v)}
-                      >
-                        <Code2 size={14} /> DevTools
-                      </button>
-                    </div>
-                    <div className="browser-body">
-                      <div className="web-content">
-                        {pageTab === "guide" ? (
-                          <div className="docs">
-                            <span className="eyebrow">
-                              FORMA / MANUAL DE SUPERVIVENCIA
-                            </span>
-                            <h2>Un input no se presenta solo.</h2>
-                            <p>
-                              El placeholder es una pista temporal: al escribir
-                              desaparece. La etiqueta permanece y le da un
-                              nombre al campo.
-                            </p>
-                            <pre>
-                              {
-                                '<label for="email">Correo electrónico</label>\n<input id="email" type="email">'
-                              }
-                            </pre>
-                            <p>
-                              <code>for</code> e <code>id</code> deben
-                              coincidir. Guarda en Code y vuelve a comprobarlo
-                              aquí.
-                            </p>
-                            <button
-                              className="lime-button"
-                              onClick={() => setApp("editor")}
-                            >
-                              Volver al editor <ArrowUpRight size={14} />
-                            </button>
-                          </div>
-                        ) : server ? (
-                          <iframe
-                            key={revision}
-                            ref={frame}
-                            title="Web ficticia de Forma"
-                            sandbox="allow-scripts allow-forms"
-                            srcDoc={previewDocument(
-                              files["index.html"],
-                              files["styles.css"],
-                            )}
-                          />
-                        ) : (
-                          <div className="connection-error">
-                            <Globe size={42} />
-                            <h2>No se puede acceder a este sitio.</h2>
-                            <p>localhost ha rechazado la conexión.</p>
-                            <code>ERR_CONNECTION_REFUSED</code>
-                            <p>
-                              El servidor no está iniciado. Abre Code y ejecuta{" "}
-                              <b>npm run dev</b> en el terminal.
-                            </p>
-                            <button
-                              onClick={() => setApp("editor")}
-                              className="lime-button"
-                            >
-                              Abrir Code <ArrowRight size={14} />
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                      {devtools && (
-                        <aside className="devtools">
-                          <div>
-                            <b>ELEMENTS</b>
-                            <span>ACCESSIBILITY</span>
-                            <button
-                              aria-label="Cerrar DevTools"
-                              onClick={() => setDevtools(false)}
-                            >
-                              <X size={13} />
-                            </button>
-                          </div>
-                          <p>INSPECTOR DE LA ESCENA</p>
-                          <button
-                            onClick={() => {
-                              if (!server) {
-                                notify(
-                                  "Inicia el servidor antes de inspeccionar la web.",
-                                );
-                                return;
-                              }
-                              mark("inspected");
-                              notify(
-                                "Campo inspeccionado. Revisa su nombre accesible y su etiqueta.",
-                              );
-                            }}
-                          >
-                            <Search size={14} /> Inspeccionar correo
-                          </button>
-                          {progress.inspected && (
-                            <>
-                              <pre>
-                                {
-                                  '<input id="email"\n  type="email"\n  placeholder="Correo…">'
-                                }
-                              </pre>
-                              <dl>
-                                <dt>Role</dt>
-                                <dd>textbox</dd>
-                                <dt>Etiqueta asociada</dt>
-                                <dd className={valid ? "good" : "bad"}>
-                                  {valid
-                                    ? "Correo electrónico"
-                                    : "No encontrada"}
-                                </dd>
-                                <dt>Nombre accesible</dt>
-                                <dd>
-                                  {valid
-                                    ? "Texto de la etiqueta"
-                                    : "Solo placeholder (frágil)"}
-                                </dd>
-                              </dl>
-                              <p className="devtools-note">
-                                El placeholder desaparece al escribir. ¿Qué le
-                                falta al campo?
-                              </p>
-                              <button
-                                onClick={() => {
-                                  setPageTab("guide");
-                                  setUrl("forma://docs");
-                                }}
-                              >
-                                <BookOpen size={13} /> Consultar documentación
-                              </button>
-                            </>
-                          )}
-                        </aside>
-                      )}
-                    </div>
-                  </div>
-                )}
-                {app === "tickets" && (
-                  <div className="tickets-layout">
-                    <aside>
-                      <h2>
-                        Trabajo<span>Tu cola de hoy</span>
-                      </h2>
-                      <button className="ticket-nav">
-                        <span className="green-dot" /> UX-001{" "}
-                        <ChevronRight size={14} />
-                      </button>
-                      <div className="next-ticket">
-                        <Lock size={16} />
-                        <span>
-                          Día 02
-                          <br />
-                          <small>Próximamente</small>
-                        </span>
-                      </div>
-                    </aside>
-                    <section className="ticket-detail">
-                      <div className="ticket-meta">
-                        UX-001{" "}
-                        <span>
-                          {progress.delivered ? "COMPLETADO" : "EN CURSO"}
-                        </span>
-                        <b>P2 · ONBOARDING</b>
-                      </div>
-                      <h2>El misterio del registro.</h2>
-                      <p>
-                        Al escribir el correo, desaparece la única indicación de
-                        qué es ese campo. Las personas pierden el contexto.
-                        Necesitamos una etiqueta visible y asociada, conservando
-                        el registro.
-                      </p>
-                      <div className="ticket-author">
-                        <span className="marta-avatar">M</span>
-                        <span>
-                          Asignado por Marta <b>→ Tú</b>
-                        </span>
-                      </div>
-                      <h3>Antes de entregar</h3>
-                      <div className="checklist">
-                        {steps.map((s) => (
-                          <div key={s.text}>
-                            <span className={s.done ? "checked" : ""}>
-                              {s.done ? <Check size={12} /> : null}
-                            </span>
-                            {s.text}
-                          </div>
-                        ))}
-                      </div>
-                      <div className="scope-note">
-                        <BookOpen size={17} />
-                        <p>
-                          No hay que reescribir la aplicación. Encuentra el
-                          cambio más pequeño que resuelva el problema.
-                        </p>
-                      </div>
-                      <button
-                        className="lime-button"
-                        onClick={() => {
-                          setApp("chat");
-                          deliver();
-                        }}
-                      >
-                        Entregar al equipo <Send size={14} />
-                      </button>
-                    </section>
-                  </div>
-                )}
-              </div>
-            </div>
-            <div className="dock">
-              {applications.map((a) => {
-                const Icon = a.icon;
-                return (
-                  <button
-                    key={a.id}
-                    onClick={() => setApp(a.id)}
-                    aria-label={`Abrir ${a.name}`}
-                    className={app === a.id ? "active" : ""}
-                  >
-                    <span style={{ background: a.color }}>
-                      <Icon size={24} />
-                    </span>
-                    <small>{a.name}</small>
-                    <i />
-                  </button>
-                );
-              })}
-              <span className="dock-divider" />
-              <button
-                onClick={() => setScreen("office")}
-                aria-label="Levantarte del ordenador"
-              >
-                <span className="office-icon">
-                  <Monitor size={23} />
-                </span>
-                <small>Oficina</small>
-              </button>
-            </div>
-          </div>
-          <div className="computer-footer">
-            <span>
-              <span className="green-dot" />{" "}
-              {server ? "SERVIDOR LOCAL ACTIVO" : "SERVIDOR DETENIDO"} <i />{" "}
-              {saved ? "PROGRESO GUARDADO" : "GUARDADO BLOQUEADO"}
-            </span>
-            <span>Aprende. Prueba. Rompe algo pequeño. Vuelve a probar.</span>
-          </div>
+          <Desktop
+            windows={windows}
+            onAction={act}
+            renderApp={renderApplication}
+            dirty={dirty}
+            onOffice={() => setScreen("office")}
+            onFullscreen={toggleFullscreen}
+            onHelp={() => {
+              setTutorial(0);
+              setTutorialCollapsed(false);
+            }}
+          />
         </main>
       )}
+      <Tutorial
+        step={tutorial}
+        onAction={tutorialAction}
+        onSkip={skipTutorial}
+        collapsed={tutorialCollapsed}
+        onCollapse={() => setTutorialCollapsed((v) => !v)}
+      />
       {toast && (
         <div className="toast" role="status">
           <CheckCircle2 size={16} />

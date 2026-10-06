@@ -64,3 +64,48 @@ test("terminal handles only supported commands and reports missing files", () =>
     /no disponible/,
   );
 });
+
+import { windowAction } from "./desktopState.ts";
+import { pageFor } from "./useBrowser.ts";
+test("window manager restores apps without duplicates and preserves geometry", () => {
+  let windows = windowAction([], { type: "open", id: "editor" });
+  windows = windowAction(windows, {
+    type: "move",
+    id: "editor",
+    x: 120,
+    y: 80,
+  });
+  windows = windowAction(windows, { type: "minimize", id: "editor" });
+  windows = windowAction(windows, { type: "open", id: "editor" });
+  assert.equal(windows.length, 1);
+  assert.equal(windows[0].minimized, false);
+  assert.equal(windows[0].x, 120);
+  windows = windowAction(windows, { type: "maximize", id: "editor" });
+  assert.equal(windows[0].maximized, true);
+  windows = windowAction(windows, { type: "maximize", id: "editor" });
+  assert.equal(windows[0].x, 120);
+});
+test("raising, closing and resizing windows preserve other apps", () => {
+  let windows = windowAction(
+    windowAction([], { type: "open", id: "browser" }),
+    { type: "open", id: "editor" },
+  );
+  windows = windowAction(windows, { type: "raise", id: "browser" });
+  assert.equal(windows.at(-1)?.id, "browser");
+  windows = windowAction(windows, {
+    type: "resize",
+    id: "editor",
+    width: 720,
+    height: 500,
+  });
+  assert.equal(windows[0].width, 720);
+  windows = windowAction(windows, { type: "close", id: "browser" });
+  assert.equal(windows.length, 1);
+  assert.equal(windows[0].id, "editor");
+});
+test("browser distinguishes project, documentation, new tabs and unknown addresses", () => {
+  assert.equal(pageFor("http://localhost:3000/signup"), "site");
+  assert.equal(pageFor("https://docs.forma.test/html/labels"), "guide");
+  assert.equal(pageFor("chrome://newtab"), "new");
+  assert.equal(pageFor("http://localhost:30000"), "error");
+});

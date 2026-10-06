@@ -41,13 +41,24 @@ function makeTexture(
   const pixels = ctx.getImageData(0, 0, 128, 128);
   for (let i = 0; i < pixels.data.length; i += 4) {
     const n =
-      (random() - 0.5) *
-      (kind === "carpet" ? 60 : kind === "plaster" ? 36 : 23);
+      (random() - 0.5) * (kind === "carpet" ? 15 : kind === "plaster" ? 10 : 8);
     for (let j = 0; j < 3; j++)
       pixels.data[i + j] = Math.max(0, Math.min(255, pixels.data[i + j] + n));
   }
   ctx.putImageData(pixels, 0, 0);
-  for (let i = 0; i < 170; i++) {
+  // Broad wear patches avoid the old high-frequency checkerboard appearance.
+  for (let i = 0; i < 6; i++) {
+    const x = random() * 128,
+      y = random() * 128,
+      r = 12 + random() * 42;
+    const gradient = ctx.createRadialGradient(x, y, 0, x, y, r);
+    gradient.addColorStop(0, "rgba(33,29,22,0.10)");
+    gradient.addColorStop(1, "rgba(33,29,22,0)");
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, 128, 128);
+  }
+
+  for (let i = 0; i < 45; i++) {
     ctx.strokeStyle = `rgba(${kind === "wood" ? "41,28,20" : "15,20,23"},${random() * 0.15})`;
     ctx.lineWidth = kind === "wood" ? 1 : random() * 2;
     ctx.beginPath();
@@ -67,8 +78,8 @@ function makeTexture(
   }
   const t = new THREE.CanvasTexture(canvas);
   t.colorSpace = THREE.SRGBColorSpace;
-  t.magFilter = THREE.NearestFilter;
-  t.minFilter = THREE.NearestMipmapNearestFilter;
+  t.magFilter = THREE.LinearFilter;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   return t;
 }
@@ -266,12 +277,12 @@ function createOffice(scene: THREE.Scene) {
   for (let y = 2.72; y > 2.1; y -= 0.12)
     box(0.35, 0.055, 3.1, -4.6, y, -3.2, warmPlastic);
   // Background cabinets, boxes, wall notes and clock.
-  box(1.4, 1.5, 0.65, 3.95, 0.75, -6.2, metal);
+  box(1.4, 1.5, 0.22, 3.95, 0.75, -6.2, metal);
   for (let y of [0.32, 0.78, 1.23]) {
     box(1.32, 0.4, 0.03, 3.95, y, -5.86, metal);
     box(0.22, 0.03, 0.05, 3.95, y, -5.82, dark);
   }
-  box(0.65, 0.5, 0.55, 3.65, 1.77, -6.2, wood);
+  box(0.22, 0.5, 0.55, 3.65, 1.77, -6.2, wood);
   label(0.53, 0.15, 3.65, 1.75, -5.918, (c) => {
     c.fillStyle = "#b7b099";
     c.fillRect(0, 0, 256, 73);
@@ -594,9 +605,9 @@ function createOffice(scene: THREE.Scene) {
   const coffee = new THREE.Group();
   coffee.userData.interaction = "coffee";
   scene.add(coffee);
-  box(1.45, 0.9, 0.65, 3.6, 0.45, -4.7, wood, coffee);
+  box(1.45, 0.9, 0.22, 3.6, 0.45, -4.7, wood, coffee);
   box(1.55, 0.075, 0.75, 3.6, 0.94, -4.7, plastic, coffee);
-  box(0.55, 0.65, 0.4, 3.66, 1.3, -4.7, dark, coffee);
+  box(0.55, 0.22, 0.4, 3.66, 1.3, -4.7, dark, coffee);
   box(0.42, 0.1, 0.04, 3.66, 1.52, -4.47, metal, coffee);
   box(0.25, 0.22, 0.02, 3.66, 1.29, -4.478, dark, coffee);
   cylinder(0.055, 0.05, 0.1, 3.66, 1.17, -4.42, plastic, coffee);
@@ -653,13 +664,13 @@ function createOffice(scene: THREE.Scene) {
 const retroShader = {
   uniforms: {
     tDiffuse: { value: null },
-    strength: { value: 0.65 },
+    strength: { value: 0.22 },
     resolution: { value: new THREE.Vector2(800, 500) },
   },
   vertexShader: `varying vec2 vUv; void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
   fragmentShader: `uniform sampler2D tDiffuse;uniform float strength;uniform vec2 resolution;varying vec2 vUv;
 float bayer(vec2 p){vec2 a=mod(floor(p),4.0);float v=0.0;if(a.y<1.0){if(a.x<1.0)v=0.0;else if(a.x<2.0)v=8.0;else if(a.x<3.0)v=2.0;else v=10.0;}else if(a.y<2.0){if(a.x<1.0)v=12.0;else if(a.x<2.0)v=4.0;else if(a.x<3.0)v=14.0;else v=6.0;}else if(a.y<3.0){if(a.x<1.0)v=3.0;else if(a.x<2.0)v=11.0;else if(a.x<3.0)v=1.0;else v=9.0;}else{if(a.x<1.0)v=15.0;else if(a.x<2.0)v=7.0;else if(a.x<3.0)v=13.0;else v=5.0;}return (v/16.0)-0.5;}
-void main(){vec3 c=texture2D(tDiffuse,vUv).rgb;float d=bayer(vUv*resolution);float n=fract(sin(dot(floor(vUv*resolution),vec2(12.9898,78.233)))*43758.5453)-.5;c+=d*.065*strength+n*.035*strength;c=mix(c,floor(c*28.0+.5)/28.0,strength*.65);float vignette=smoothstep(.18,.85,length((vUv-.5)*vec2(1.1,1.0)));c*=1.0-vignette*.48;gl_FragColor=vec4(c,1.0);}`,
+void main(){vec3 c=texture2D(tDiffuse,vUv).rgb;float d=bayer(vUv*resolution);float n=fract(sin(dot(floor(vUv*resolution),vec2(12.9898,78.233)))*43758.5453)-.5;c+=d*.025*strength+n*.012*strength;c=mix(c,floor(c*28.0+.5)/28.0,strength*.35);float vignette=smoothstep(.18,.85,length((vUv-.5)*vec2(1.1,1.0)));c*=1.0-vignette*.25;gl_FragColor=vec4(c,1.0);}`,
 };
 export default function OfficeScene({ onInteract, paused }: Props) {
   const mount = useRef<HTMLDivElement>(null),
@@ -669,12 +680,12 @@ export default function OfficeScene({ onInteract, paused }: Props) {
     direct = useRef((id: ObjectId) => callbacks.current.onInteract(id)),
     setLook = useRef((dx: number, dy: number) => {}),
     movement = useRef(new Set<string>()),
-    qualityRef = useRef(0.65);
+    qualityRef = useRef(0.22);
   callbacks.current = { onInteract, paused };
   const [target, setTarget] = useState<ObjectId | null>("computer"),
     [failed, setFailed] = useState(false),
     [locked, setLocked] = useState(false),
-    [quality, setQuality] = useState(0.65),
+    [quality, setQuality] = useState(0.22),
     [message, setMessage] = useState(
       "Arrastra para mirar. Acércate a los objetos y pulsa E.",
     ),
@@ -740,7 +751,7 @@ export default function OfficeScene({ onInteract, paused }: Props) {
     const resize = () => {
       const w = Math.max(1, host.clientWidth),
         h = Math.max(1, host.clientHeight);
-      renderWidth = Math.min(960, Math.round(w * 0.72));
+      renderWidth = Math.min(1280, Math.round(w * 0.9));
       renderHeight = Math.round((renderWidth * h) / w);
       renderer.setSize(renderWidth, renderHeight, false);
       composer.setSize(renderWidth, renderHeight);
